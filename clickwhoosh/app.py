@@ -77,8 +77,8 @@ class App(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Whoosh Clicker")
-        self._collapsed_geometry = "640x250"
-        self._expanded_geometry = "720x560"
+        self._collapsed_geometry = "640x320"
+        self._expanded_geometry = "720x620"
         self.geometry(self._collapsed_geometry)
 
         self._loop = asyncio.new_event_loop()
