@@ -71,9 +71,16 @@ class Button(enum.Enum):
     Z = "Z"
 
 
-# Display label for each button. Filled in as we identify bits.
+# Display label for each button. Identified empirically; press order on the
+# left puck was +, ↑, →, ↓, ← and yielded bits 4, 5, 6, 7, 12 respectively.
+# Right puck bits will be filled in once that puck is awake and we run the
+# same mapping pass.
 BUTTON_LABELS: dict[int, tuple[Puck, Button]] = {
-    # bit 12: (Puck.LEFT, Button.NAV_UP),   # example — fill in from discovery
+    4: (Puck.LEFT, Button.SHIFT_UP),
+    5: (Puck.LEFT, Button.NAV_UP),
+    6: (Puck.LEFT, Button.NAV_RIGHT),
+    7: (Puck.LEFT, Button.NAV_DOWN),
+    12: (Puck.LEFT, Button.NAV_LEFT),
 }
 
 
