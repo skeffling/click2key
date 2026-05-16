@@ -331,6 +331,16 @@ class App(ctk.CTk):
         self._submit(self._scan_and_connect())
 
     def _open_accessibility_settings(self) -> None:
+        # Help the user pick the right binary: print the path of the Python
+        # interpreter that's actually running this process, since that's what
+        # macOS needs the permission for when running from a terminal.
+        import os
+        py = os.path.realpath(sys.executable)
+        log.info(
+            "Accessibility target binary (drag this into the list in "
+            "System Settings → Privacy → Accessibility):\n    %s",
+            py,
+        )
         self._open_system_settings(
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
             "Accessibility",
