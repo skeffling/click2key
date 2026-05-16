@@ -12,7 +12,7 @@ from PyInstaller.utils.hooks import collect_data_files
 block_cipher = None
 
 a = Analysis(
-    ['clickwhoosh/app.py'],
+    ['launch.py'],
     pathex=[],
     binaries=[],
     # CustomTkinter ships JSON theme files; bleak has platform backends loaded

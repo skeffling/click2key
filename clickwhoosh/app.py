@@ -52,30 +52,40 @@ def _accessibility_trusted() -> bool | None:
 
 
 def _accessibility_target() -> str:
-    """Best macOS Accessibility target for the running Python.
+    """Best macOS Accessibility target for the running process.
 
-    Prefers the framework's Python.app bundle (Apple's preferred shape for
-    Accessibility entries); falls back to the resolved python3.x binary.
+    - If we're inside a bundled .app (PyInstaller / py2app), return the .app
+      path — this is what the user adds to System Settings, and the bundle ID
+      makes the grant stick.
+    - Otherwise (running under a venv / framework Python), return the
+      framework's Python.app bundle.
+    - Fallback: the resolved python binary.
     """
     import os
     real = os.path.realpath(sys.executable)
-    # Walk up looking for a Python.framework/Versions/X.Y dir, then point at
-    # its Resources/Python.app bundle if present.
+
+    # Bundled-app case: walk up until we find a dir ending in '.app'.
+    head = real
+    for _ in range(8):
+        head = os.path.dirname(head)
+        if head in ("", "/"):
+            break
+        if head.endswith(".app"):
+            return head
+
+    # Framework Python case.
     head = real
     for _ in range(8):
         head = os.path.dirname(head)
         if os.path.basename(head) == "Python.framework":
+            versions_dir = os.path.join(head, "Versions")
+            if os.path.isdir(versions_dir):
+                for v in sorted(os.listdir(versions_dir), reverse=True):
+                    candidate = os.path.join(versions_dir, v, "Resources", "Python.app")
+                    if os.path.isdir(candidate):
+                        return candidate
             break
-    else:
-        return real
-    # head is .../Python.framework — find the active Versions/X.Y/Resources/Python.app
-    versions_dir = os.path.join(head, "Versions")
-    if not os.path.isdir(versions_dir):
-        return real
-    for v in sorted(os.listdir(versions_dir), reverse=True):
-        candidate = os.path.join(versions_dir, v, "Resources", "Python.app")
-        if os.path.isdir(candidate):
-            return candidate
+
     return real
 
 # (display text, optional Button mapping) per glyph in the title.
