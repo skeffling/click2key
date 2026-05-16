@@ -61,10 +61,12 @@ class Puck(enum.Enum):
 class Button(enum.Enum):
     SHIFT_UP = "shift_up"      # + on left puck
     SHIFT_DOWN = "shift_down"  # − on right puck
-    # Nav diamond. On the + puck these are colored corner buttons:
-    #   Y (blue) = NAV_UP, A (green) = NAV_RIGHT,
-    #   B (magenta) = NAV_DOWN, Z (orange) = NAV_LEFT.
-    # On the − puck they are plain arrow icons.
+    # Left puck colored corner buttons (Y top, A right, B bottom, Z left).
+    A = "A"  # green, right of diamond
+    B = "B"  # magenta, bottom of diamond
+    Y = "Y"  # blue, top of diamond
+    Z = "Z"  # orange, left of diamond
+    # Right puck plain arrow icons.
     NAV_UP = "nav_up"
     NAV_DOWN = "nav_down"
     NAV_LEFT = "nav_left"
@@ -78,13 +80,11 @@ class Button(enum.Enum):
 BUTTON_LABELS: dict[int, tuple[Puck, Button]] = {
     # Left puck (+ / A·B·Y·Z). Confirmed by pressing buttons by letter in
     # order +, A, B, Y, Z which yielded bits 12, 4, 5, 6, 7.
-    # On this puck the colored buttons ARE the nav diamond:
-    #   Y (blue) = top, A (green) = right, B (magenta) = bottom, Z (orange) = left.
-    12: (Puck.LEFT, Button.SHIFT_UP),    # +
-    6:  (Puck.LEFT, Button.NAV_UP),       # Y, top
-    4:  (Puck.LEFT, Button.NAV_RIGHT),    # A, right
-    5:  (Puck.LEFT, Button.NAV_DOWN),     # B, bottom
-    7:  (Puck.LEFT, Button.NAV_LEFT),     # Z, left
+    12: (Puck.LEFT, Button.SHIFT_UP),  # +
+    4:  (Puck.LEFT, Button.A),         # green, right
+    5:  (Puck.LEFT, Button.B),         # magenta, bottom
+    6:  (Puck.LEFT, Button.Y),         # blue, top
+    7:  (Puck.LEFT, Button.Z),         # orange, left
     # Right puck (− / arrows). Confirmed by pressing −, ↑, ↓, ←, → which
     # yielded bits 8, 3, 1, 2, 0.
     8:  (Puck.RIGHT, Button.SHIFT_DOWN),

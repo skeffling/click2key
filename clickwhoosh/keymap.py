@@ -88,10 +88,19 @@ MYWHOOSH_PRESETS: list[tuple[str, str]] = [
 DEFAULTS_BY_BUTTON: dict[Button, str] = {
     Button.SHIFT_UP:   "k",
     Button.SHIFT_DOWN: "i",
+    # Right puck arrows → keyboard arrows (matches MyWhoosh's nav defaults).
     Button.NAV_UP:     "up",
     Button.NAV_DOWN:   "down",
     Button.NAV_LEFT:   "left",
     Button.NAV_RIGHT:  "right",
+    # Left puck colored buttons → reasonable starting points; user can remap.
+    # MyWhoosh has H=toggle UI, A=steer left, D=steer right, T=tuck, U=u-turn,
+    # 1-7=emotes. Defaulting to the colored letters themselves keeps things
+    # predictable; rebind in Configure keys… to taste.
+    Button.A:          "a",
+    Button.B:          "b",
+    Button.Y:          "y",
+    Button.Z:          "z",
 }
 
 

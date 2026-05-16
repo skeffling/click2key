@@ -31,10 +31,14 @@ log = logging.getLogger(__name__)
 _BUTTON_LABELS: dict[Button, str] = {
     Button.SHIFT_UP:   "Shift up  (+)",
     Button.SHIFT_DOWN: "Shift down  (−)",
-    Button.NAV_UP:     "Nav up  (Y / ↑)",
-    Button.NAV_DOWN:   "Nav down  (B / ↓)",
-    Button.NAV_LEFT:   "Nav left  (Z / ←)",
-    Button.NAV_RIGHT:  "Nav right  (A / →)",
+    Button.Y:          "Y  (blue,    left puck, top)",
+    Button.A:          "A  (green,   left puck, right)",
+    Button.B:          "B  (magenta, left puck, bottom)",
+    Button.Z:          "Z  (orange,  left puck, left)",
+    Button.NAV_UP:     "↑  (right puck, up)",
+    Button.NAV_DOWN:   "↓  (right puck, down)",
+    Button.NAV_LEFT:   "←  (right puck, left)",
+    Button.NAV_RIGHT:  "→  (right puck, right)",
 }
 
 
@@ -47,7 +51,7 @@ class KeymapDialog(ctk.CTkToplevel):
     ) -> None:
         super().__init__(parent)
         self.title("Configure keyboard mapping")
-        self.geometry("520x420")
+        self.geometry("560x520")
         self.transient(parent)
 
         self._on_apply = on_apply

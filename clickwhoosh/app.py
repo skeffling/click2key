@@ -93,13 +93,13 @@ _LEFT_LAYOUT: list[tuple[str, Button | None]] = [
     ("  ", None),
     ("+", Button.SHIFT_UP),
     (" ", None),
-    ("A", Button.NAV_RIGHT),
+    ("A", Button.A),
     (" ", None),
-    ("B", Button.NAV_DOWN),
+    ("B", Button.B),
     (" ", None),
-    ("Y", Button.NAV_UP),
+    ("Y", Button.Y),
     (" ", None),
-    ("Z", Button.NAV_LEFT),
+    ("Z", Button.Z),
 ]
 
 _RIGHT_LAYOUT: list[tuple[str, Button | None]] = [
@@ -272,6 +272,16 @@ class App(ctk.CTk):
         ctk.CTkButton(
             perm_row, text="Configure keys…", width=140,
             command=self._open_keymap_dialog,
+        ).pack(side="left", padx=4)
+
+        test_row = ctk.CTkFrame(self._debug_pane, fg_color="transparent")
+        test_row.pack(fill="x", padx=8, pady=(0, 4))
+        ctk.CTkLabel(test_row, text="Test box:").pack(side="left", padx=(4, 8))
+        self._test_box = ctk.CTkEntry(test_row, placeholder_text="click here, then press a puck button")
+        self._test_box.pack(side="left", fill="x", expand=True, padx=4)
+        ctk.CTkButton(
+            test_row, text="Clear", width=70,
+            command=lambda: self._test_box.delete(0, "end"),
         ).pack(side="left", padx=4)
 
         log_box = ctk.CTkTextbox(self._debug_pane, state="disabled")
