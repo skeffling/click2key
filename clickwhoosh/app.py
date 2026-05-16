@@ -539,7 +539,6 @@ class App(ctk.CTk):
             self.after(0, self._set_scanning, False)
         if not devices:
             log.warning("No Click devices found")
-            self.after(0, lambda: self._click_status.configure(text="Click: not found"))
             return
         log.info("Found %d device(s); connecting to all", len(devices))
 
