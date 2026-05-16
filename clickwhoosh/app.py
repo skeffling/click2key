@@ -20,32 +20,34 @@ from .click_v2 import Button, ButtonEvent, ClickV2, Puck
 from .whoosh_link import LINK_PORT, WhooshLinkServer
 
 DOT_OFF = "#888888"
+DOT_PENDING = "#d8a200"  # connected but puck identity unknown until first press
 DOT_ON = "#33aa55"
 
 # (display text, optional Button mapping) per glyph in the title.
 _LEFT_LAYOUT: list[tuple[str, Button | None]] = [
-    ("  (", None),
+    ("  ", None),
     ("+", Button.SHIFT_UP),
-    (" / ", None),
+    (" ", None),
     ("A", Button.NAV_RIGHT),
-    ("·", None),
+    (" ", None),
     ("B", Button.NAV_DOWN),
-    ("·", None),
+    (" ", None),
     ("Y", Button.NAV_UP),
-    ("·", None),
+    (" ", None),
     ("Z", Button.NAV_LEFT),
-    (")", None),
 ]
 
 _RIGHT_LAYOUT: list[tuple[str, Button | None]] = [
-    ("  (", None),
+    ("  ", None),
     ("−", Button.SHIFT_DOWN),
-    (" / ", None),
+    (" ", None),
     ("↑", Button.NAV_UP),
+    (" ", None),
     ("↓", Button.NAV_DOWN),
+    (" ", None),
     ("←", Button.NAV_LEFT),
+    (" ", None),
     ("→", Button.NAV_RIGHT),
-    (")", None),
 ]
 
 log = logging.getLogger(__name__)
@@ -71,8 +73,8 @@ class App(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
         self.title("clickwhoosh")
-        self._collapsed_geometry = "560x280"
-        self._expanded_geometry = "640x580"
+        self._collapsed_geometry = "640x250"
+        self._expanded_geometry = "720x560"
         self.geometry(self._collapsed_geometry)
 
         self._loop = asyncio.new_event_loop()
@@ -84,6 +86,11 @@ class App(ctk.CTk):
         self._bridge_tasks: dict[str, asyncio.Task] = {}
         self._deduper = EventDeduper()
         self._link = WhooshLinkServer(on_connection_change=self._on_link_state)
+
+        # Tri-state per puck: identified (green) > pending BLE (yellow) > none (grey).
+        self._left_identified = False
+        self._right_identified = False
+        self._link_connected = False
 
         self._build_ui()
         self._submit(self._start_services())
@@ -101,38 +108,45 @@ class App(ctk.CTk):
         sub = ctk.CTkLabel(self, text=f"Zwift Click V2 → MyWhoosh (port {LINK_PORT})")
         sub.pack()
 
-        row = ctk.CTkFrame(self)
-        row.pack(fill="x", padx=12, pady=12)
-
-        self._link_status = ctk.CTkLabel(row, text="MyWhoosh: waiting…")
-        self._link_status.pack(side="left", padx=8)
-
-        self._click_status = ctk.CTkLabel(row, text="Click: disconnected")
-        self._click_status.pack(side="left", padx=8)
-
-        self._scan_btn = ctk.CTkButton(
-            row, text="Scan + Connect", width=160, command=self._on_scan_click
-        )
-        self._scan_btn.pack(side="right", padx=8)
-        self._scan_spinner = ctk.CTkProgressBar(row, mode="indeterminate", width=120)
-        # Spinner is created hidden; only pack when scanning.
-
+        # Two columns of puck cards.
         pucks_row = ctk.CTkFrame(self)
-        pucks_row.pack(fill="x", padx=12, pady=(0, 8))
-
+        pucks_row.pack(fill="x", padx=12, pady=(8, 8))
         self._left_dot, self._left_glyphs = self._build_puck_row(
-            pucks_row, "Left puck", _LEFT_LAYOUT
+            pucks_row, "Left puck", _LEFT_LAYOUT, column=0,
         )
         self._right_dot, self._right_glyphs = self._build_puck_row(
-            pucks_row, "Right puck", _RIGHT_LAYOUT
+            pucks_row, "Right puck", _RIGHT_LAYOUT, column=1,
         )
+        pucks_row.grid_columnconfigure(0, weight=1)
+        pucks_row.grid_columnconfigure(1, weight=1)
+
+        # Status + hint area below the pucks.
+        status_frame = ctk.CTkFrame(self, fg_color="transparent")
+        status_frame.pack(fill="x", padx=12, pady=(0, 6))
+        self._link_status = ctk.CTkLabel(
+            status_frame, text="MyWhoosh: waiting…", anchor="w",
+            font=ctk.CTkFont(weight="bold"),
+        )
+        self._link_status.pack(side="left", padx=8)
+        self._scan_btn = ctk.CTkButton(
+            status_frame, text="Scan + Connect", width=140,
+            command=self._on_scan_click,
+        )
+        self._scan_btn.pack(side="right", padx=8)
+        self._scan_spinner = ctk.CTkProgressBar(
+            status_frame, mode="indeterminate", width=110,
+        )
+
+        self._hint_label = ctk.CTkLabel(
+            self, text="", anchor="w", text_color="gray60",
+        )
+        self._hint_label.pack(fill="x", padx=20, pady=(0, 4))
 
         # Toggle row — the only thing visible from the debug pane when collapsed.
         toggle_row = ctk.CTkFrame(self, fg_color="transparent")
-        toggle_row.pack(fill="x", padx=12, pady=(0, 8))
+        toggle_row.pack(fill="x", padx=12, pady=(2, 8))
         self._debug_toggle = ctk.CTkButton(
-            toggle_row, text="Show debug ▾", width=130, height=28,
-            fg_color="transparent", border_width=1,
+            toggle_row, text="Show debug ▾", width=140, height=28,
             command=self._toggle_debug_pane,
         )
         self._debug_toggle.pack(side="right")
@@ -162,6 +176,7 @@ class App(ctk.CTk):
         root_log.addHandler(handler)
 
         self._debug_visible = False
+        self._refresh_state()
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -170,26 +185,51 @@ class App(ctk.CTk):
         parent: ctk.CTkFrame,
         name: str,
         layout: list[tuple[str, Button | None]],
+        column: int,
     ) -> tuple[ctk.CTkLabel, dict[Button, ctk.CTkLabel]]:
-        row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(fill="x", padx=8, pady=6)
+        card = ctk.CTkFrame(parent, fg_color="transparent")
+        card.grid(row=0, column=column, sticky="ew", padx=8, pady=6)
 
         dot = ctk.CTkLabel(
-            row, text="●", text_color=DOT_OFF, font=ctk.CTkFont(size=16), width=18,
+            card, text="●", text_color=DOT_OFF, font=ctk.CTkFont(size=16), width=18,
         )
         dot.pack(side="left")
         ctk.CTkLabel(
-            row, text=name, font=ctk.CTkFont(weight="bold"),
+            card, text=name, font=ctk.CTkFont(weight="bold"),
         ).pack(side="left")
 
         glyphs: dict[Button, ctk.CTkLabel] = {}
         normal_font = ctk.CTkFont()
         for text, button in layout:
-            lbl = ctk.CTkLabel(row, text=text, font=normal_font)
+            lbl = ctk.CTkLabel(card, text=text, font=normal_font)
             lbl.pack(side="left", padx=0)
             if button is not None:
                 glyphs[button] = lbl
         return dot, glyphs
+
+    def _refresh_state(self) -> None:
+        """Recompute dot colors and the hint line from current state."""
+        ble_count = len(self._clicks)
+
+        for dot, identified in (
+            (self._left_dot, self._left_identified),
+            (self._right_dot, self._right_identified),
+        ):
+            if identified:
+                color = DOT_ON
+            elif ble_count > 0:
+                color = DOT_PENDING
+            else:
+                color = DOT_OFF
+            dot.configure(text_color=color)
+
+        if not self._link_connected:
+            hint = "Open MyWhoosh and start a ride — it will connect here."
+        elif not (self._left_identified and self._right_identified):
+            hint = "Press a button on each puck to confirm pairing."
+        else:
+            hint = "Ready. Pedal away."
+        self._hint_label.configure(text=hint)
 
     def _flash_glyph(self, puck: Puck, button: Button | None) -> None:
         if button is None:
@@ -230,8 +270,13 @@ class App(ctk.CTk):
         self._submit(self._scan_and_connect())
 
     def _on_link_state(self, connected: bool) -> None:
-        text = "MyWhoosh: connected" if connected else "MyWhoosh: waiting…"
-        self.after(0, lambda: self._link_status.configure(text=text))
+        def apply() -> None:
+            self._link_connected = connected
+            self._link_status.configure(
+                text="MyWhoosh: connected" if connected else "MyWhoosh: waiting…"
+            )
+            self._refresh_state()
+        self.after(0, apply)
 
     def _on_close(self) -> None:
         async def shutdown() -> None:
@@ -261,10 +306,12 @@ class App(ctk.CTk):
         self.after(0, self._apply_button_event, event)
 
     def _apply_button_event(self, event: ButtonEvent) -> None:
-        if event.puck is Puck.LEFT:
-            self._left_dot.configure(text_color=DOT_ON)
-        elif event.puck is Puck.RIGHT:
-            self._right_dot.configure(text_color=DOT_ON)
+        if event.puck is Puck.LEFT and not self._left_identified:
+            self._left_identified = True
+            self._refresh_state()
+        elif event.puck is Puck.RIGHT and not self._right_identified:
+            self._right_identified = True
+            self._refresh_state()
         if event.is_down:
             self._flash_glyph(event.puck, event.button)
 
@@ -299,13 +346,9 @@ class App(ctk.CTk):
                     deduper=self._deduper,
                 )
             )
+            self.after(0, self._refresh_state)
 
         await asyncio.gather(*(connect_one(d) for d in devices))
-
-        n = len(self._clicks)
-        self.after(0, lambda: self._click_status.configure(
-            text=f"Click: {n} puck(s) connected"
-        ))
 
     # ------------------------------------------------------------------
     # Loop plumbing
