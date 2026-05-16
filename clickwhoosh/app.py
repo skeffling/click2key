@@ -372,8 +372,15 @@ class App(ctk.CTk):
     def _refresh_state(self) -> None:
         """Recompute dot colors, subtitle and hint. Skips no-op .configure() calls."""
         ble_count = len(self._clicks)
-        method = "Keyboard" if self._bridge.mode is OutputMode.KEYBOARD else "OpenBikeControl"
+        is_keyboard = self._bridge.mode is OutputMode.KEYBOARD
+        method = "Keyboard" if is_keyboard else "OpenBikeControl"
         subtitle = f"Click 2  →  Whoosh Clicker  →  MyWhoosh  ({method})"
+
+        # Link status is meaningless in keyboard mode — hide it then.
+        if is_keyboard and self._link_status.winfo_ismapped():
+            self._link_status.pack_forget()
+        elif not is_keyboard and not self._link_status.winfo_ismapped():
+            self._link_status.pack(side="left", padx=8)
         if subtitle != self._last_subtitle:
             self._subtitle.configure(text=subtitle)
             self._last_subtitle = subtitle
