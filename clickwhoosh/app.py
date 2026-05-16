@@ -16,8 +16,37 @@ from typing import Any
 import customtkinter as ctk
 
 from .bridge import EventDeduper, run_bridge
-from .click_v2 import ButtonEvent, ClickV2, Puck
+from .click_v2 import Button, ButtonEvent, ClickV2, Puck
 from .whoosh_link import LINK_PORT, WhooshLinkServer
+
+DOT_OFF = "#888888"
+DOT_ON = "#33aa55"
+
+# (display text, optional Button mapping) per glyph in the title.
+_LEFT_LAYOUT: list[tuple[str, Button | None]] = [
+    ("  (", None),
+    ("+", Button.SHIFT_UP),
+    (" / ", None),
+    ("A", Button.NAV_RIGHT),
+    ("·", None),
+    ("B", Button.NAV_DOWN),
+    ("·", None),
+    ("Y", Button.NAV_UP),
+    ("·", None),
+    ("Z", Button.NAV_LEFT),
+    (")", None),
+]
+
+_RIGHT_LAYOUT: list[tuple[str, Button | None]] = [
+    ("  (", None),
+    ("−", Button.SHIFT_DOWN),
+    (" / ", None),
+    ("↑", Button.NAV_UP),
+    ("↓", Button.NAV_DOWN),
+    ("←", Button.NAV_LEFT),
+    ("→", Button.NAV_RIGHT),
+    (")", None),
+]
 
 log = logging.getLogger(__name__)
 
@@ -42,8 +71,8 @@ class App(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
         self.title("clickwhoosh")
-        self._collapsed_geometry = "560x260"
-        self._expanded_geometry = "640x560"
+        self._collapsed_geometry = "560x210"
+        self._expanded_geometry = "640x520"
         self.geometry(self._collapsed_geometry)
 
         self._loop = asyncio.new_event_loop()
@@ -91,30 +120,12 @@ class App(ctk.CTk):
         pucks_row = ctk.CTkFrame(self)
         pucks_row.pack(fill="x", padx=12, pady=(0, 8))
 
-        self._left_title = ctk.CTkLabel(
-            pucks_row, text="Left puck  (+ / A·B·Y·Z)",
-            font=ctk.CTkFont(weight="bold"),
+        self._left_dot, self._left_glyphs = self._build_puck_row(
+            pucks_row, "Left puck", _LEFT_LAYOUT
         )
-        self._left_title.grid(row=0, column=0, sticky="w", padx=8, pady=(6, 0))
-        self._left_status = ctk.CTkLabel(pucks_row, text="not seen yet", anchor="w")
-        self._left_status.grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
-        self._left_last = ctk.CTkLabel(pucks_row, text="last button: —", anchor="w")
-        self._left_last.grid(row=2, column=0, sticky="w", padx=8, pady=(0, 6))
-
-        self._right_title = ctk.CTkLabel(
-            pucks_row, text="Right puck  (− / ↑↓←→)",
-            font=ctk.CTkFont(weight="bold"),
+        self._right_dot, self._right_glyphs = self._build_puck_row(
+            pucks_row, "Right puck", _RIGHT_LAYOUT
         )
-        self._right_title.grid(row=0, column=1, sticky="w", padx=8, pady=(6, 0))
-        self._right_status = ctk.CTkLabel(pucks_row, text="not seen yet", anchor="w")
-        self._right_status.grid(row=1, column=1, sticky="w", padx=8, pady=(0, 6))
-        self._right_last = ctk.CTkLabel(pucks_row, text="last button: —", anchor="w")
-        self._right_last.grid(row=2, column=1, sticky="w", padx=8, pady=(0, 6))
-
-        pucks_row.grid_columnconfigure(0, weight=1)
-        pucks_row.grid_columnconfigure(1, weight=1)
-
-        self._seen_pucks: set[Puck] = set()
 
         # Toggle row — the only thing visible from the debug pane when collapsed.
         toggle_row = ctk.CTkFrame(self, fg_color="transparent")
@@ -153,6 +164,42 @@ class App(ctk.CTk):
         self._debug_visible = False
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _build_puck_row(
+        self,
+        parent: ctk.CTkFrame,
+        name: str,
+        layout: list[tuple[str, Button | None]],
+    ) -> tuple[ctk.CTkLabel, dict[Button, ctk.CTkLabel]]:
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", padx=8, pady=6)
+
+        dot = ctk.CTkLabel(
+            row, text="●", text_color=DOT_OFF, font=ctk.CTkFont(size=16), width=18,
+        )
+        dot.pack(side="left")
+        ctk.CTkLabel(
+            row, text=name, font=ctk.CTkFont(weight="bold"),
+        ).pack(side="left")
+
+        glyphs: dict[Button, ctk.CTkLabel] = {}
+        normal_font = ctk.CTkFont()
+        for text, button in layout:
+            lbl = ctk.CTkLabel(row, text=text, font=normal_font)
+            lbl.pack(side="left", padx=0)
+            if button is not None:
+                glyphs[button] = lbl
+        return dot, glyphs
+
+    def _flash_glyph(self, puck: Puck, button: Button | None) -> None:
+        if button is None:
+            return
+        glyphs = self._left_glyphs if puck is Puck.LEFT else self._right_glyphs
+        lbl = glyphs.get(button)
+        if lbl is None:
+            return
+        lbl.configure(font=ctk.CTkFont(weight="bold"))
+        self.after(180, lambda: lbl.configure(font=ctk.CTkFont(weight="normal")))
 
     def _set_scanning(self, scanning: bool) -> None:
         if scanning:
@@ -214,18 +261,12 @@ class App(ctk.CTk):
         self.after(0, self._apply_button_event, event)
 
     def _apply_button_event(self, event: ButtonEvent) -> None:
-        puck = event.puck
-        self._seen_pucks.add(puck)
-        verb = "pressed" if event.is_down else "released"
-        line = f"last button: {event.label} ({verb})"
-        if puck is Puck.LEFT:
-            self._left_status.configure(text="connected")
-            self._left_last.configure(text=line)
-        elif puck is Puck.RIGHT:
-            self._right_status.configure(text="connected")
-            self._right_last.configure(text=line)
-        # Unmapped bits: leave puck status alone (we can't tell which puck);
-        # the raw "bitN (verb)" line still shows up in the log textbox.
+        if event.puck is Puck.LEFT:
+            self._left_dot.configure(text_color=DOT_ON)
+        elif event.puck is Puck.RIGHT:
+            self._right_dot.configure(text_color=DOT_ON)
+        if event.is_down:
+            self._flash_glyph(event.puck, event.button)
 
     async def _scan_and_connect(self) -> None:
         self.after(0, self._set_scanning, True)
