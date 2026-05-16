@@ -201,10 +201,24 @@ class App(ctk.CTk):
         ctk.set_appearance_mode("system")
         ctk.set_default_color_theme("blue")
 
-        header = ctk.CTkLabel(self, text="Whoosh Clicker", font=ctk.CTkFont(size=20, weight="bold"))
-        header.pack(pady=(12, 4))
+        # Top bar: title on the left, Scan+Connect on the right.
+        top_bar = ctk.CTkFrame(self, fg_color="transparent")
+        top_bar.pack(fill="x", padx=12, pady=(10, 0))
+        ctk.CTkLabel(
+            top_bar, text="Whoosh Clicker",
+            font=ctk.CTkFont(size=20, weight="bold"),
+        ).pack(side="left")
+        self._scan_btn = ctk.CTkButton(
+            top_bar, text="Scan + Connect", width=140,
+            command=self._on_scan_click,
+        )
+        self._scan_btn.pack(side="right")
+        self._scan_spinner = ctk.CTkProgressBar(
+            top_bar, mode="indeterminate", width=110,
+        )
+
         self._subtitle = ctk.CTkLabel(self, text="")
-        self._subtitle.pack()
+        self._subtitle.pack(pady=(2, 0))
 
         # Two columns of puck cards.
         self._normal_font = ctk.CTkFont()
@@ -216,7 +230,7 @@ class App(ctk.CTk):
         pucks_row.grid_columnconfigure(0, weight=1)
         pucks_row.grid_columnconfigure(1, weight=1)
 
-        # Status + hint area below the pucks.
+        # Status row: MyWhoosh link state (hidden in Keyboard mode).
         status_frame = ctk.CTkFrame(self, fg_color="transparent")
         status_frame.pack(fill="x", padx=12, pady=(0, 6))
         self._link_status = ctk.CTkLabel(
@@ -224,14 +238,6 @@ class App(ctk.CTk):
             font=ctk.CTkFont(weight="bold"),
         )
         self._link_status.pack(side="left", padx=8)
-        self._scan_btn = ctk.CTkButton(
-            status_frame, text="Scan + Connect", width=140,
-            command=self._on_scan_click,
-        )
-        self._scan_btn.pack(side="right", padx=8)
-        self._scan_spinner = ctk.CTkProgressBar(
-            status_frame, mode="indeterminate", width=110,
-        )
 
         mode_row = ctk.CTkFrame(self, fg_color="transparent")
         mode_row.pack(fill="x", padx=12, pady=(0, 2))
