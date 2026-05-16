@@ -32,6 +32,9 @@ ZWIFT_CUSTOM_SERVICE_UUID = "0000fc82-0000-1000-8000-00805f9b34fb"
 ZWIFT_ASYNC_CHAR_UUID = "00000002-19ca-4651-86e5-fa29dcdd09d1"
 ZWIFT_SYNC_TX_CHAR_UUID = "00000003-19ca-4651-86e5-fa29dcdd09d1"
 ZWIFT_SYNC_RX_CHAR_UUID = "00000004-19ca-4651-86e5-fa29dcdd09d1"
+# V2-only extra characteristics (don't exist on V1). Best guess for the
+# control / keepalive channel.
+ZWIFT_V2_CTRL_CHAR_UUID = "00000101-19ca-4651-86e5-fa29dcdd09d1"
 
 # Bytes the device sends/expects during the unencrypted "hello" phase.
 RIDE_ON = bytes([0x52, 0x69, 0x64, 0x65, 0x4F, 0x6E])  # b"RideOn"
@@ -138,11 +141,28 @@ class ClickV2:
         log.info("Subscribed to async + sync RX")
 
         await self._handshake()
-        # Keepalive disabled — the [0xFF 0x04 0x00] write to SYNC_TX seemed
-        # to make the puck stop emitting notifications altogether. Need to
-        # figure out the right channel/sequence; for now the 60s sleep is
-        # mitigated by pairing once with the official Zwift app.
-        log.info("Click V2 ready (greeting sent)")
+        # Keepalive experiment: write [0xFF 0x04 0x00] to char 0x101 (a V2-only
+        # extra characteristic) every 25s. SYNC_TX was the wrong channel last
+        # time (silenced the puck immediately); 0x101 is the next best guess
+        # for the control/keepalive channel.
+        self._keepalive_task = asyncio.create_task(self._keepalive_loop())
+        log.info("Click V2 ready (greeting sent, keepalive on 0x101)")
+
+    async def _keepalive_loop(self) -> None:
+        assert self._client is not None
+        try:
+            while self._client.is_connected:
+                try:
+                    await self._client.write_gatt_char(
+                        ZWIFT_V2_CTRL_CHAR_UUID, KEEPALIVE, response=False,
+                    )
+                    log.debug("keepalive tx to 0x101")
+                except Exception:
+                    log.exception("Keepalive write failed; stopping loop")
+                    return
+                await asyncio.sleep(KEEPALIVE_INTERVAL_SECONDS)
+        except asyncio.CancelledError:
+            pass
 
     async def _dump_gatt(self) -> None:
         assert self._client is not None
