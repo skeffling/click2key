@@ -15,7 +15,7 @@ from typing import Any
 
 import customtkinter as ctk
 
-from .bridge import run_bridge
+from .bridge import EventDeduper, run_bridge
 from .click_v2 import ButtonEvent, ClickV2, Puck
 from .whoosh_link import LINK_PORT, WhooshLinkServer
 
@@ -51,6 +51,7 @@ class App(ctk.CTk):
         # One ClickV2 per BLE-connected puck. Keyed by device address.
         self._clicks: dict[str, ClickV2] = {}
         self._bridge_tasks: dict[str, asyncio.Task] = {}
+        self._deduper = EventDeduper()
         self._link = WhooshLinkServer(on_connection_change=self._on_link_state)
 
         self._build_ui()
@@ -85,7 +86,7 @@ class App(ctk.CTk):
         pucks_row.pack(fill="x", padx=12, pady=(0, 8))
 
         self._left_title = ctk.CTkLabel(
-            pucks_row, text="Left puck  (+ / arrows / A·B·Y·Z)",
+            pucks_row, text="Left puck  (+ / A·B·Y·Z)",
             font=ctk.CTkFont(weight="bold"),
         )
         self._left_title.grid(row=0, column=0, sticky="w", padx=8, pady=(6, 0))
@@ -95,7 +96,7 @@ class App(ctk.CTk):
         self._left_last.grid(row=2, column=0, sticky="w", padx=8, pady=(0, 6))
 
         self._right_title = ctk.CTkLabel(
-            pucks_row, text="Right puck  (− / arrows)",
+            pucks_row, text="Right puck  (− / ↑↓←→)",
             font=ctk.CTkFont(weight="bold"),
         )
         self._right_title.grid(row=0, column=1, sticky="w", padx=8, pady=(6, 0))
@@ -204,7 +205,11 @@ class App(ctk.CTk):
                 return
             self._clicks[dev.address] = click
             self._bridge_tasks[dev.address] = asyncio.create_task(
-                run_bridge(click, self._link, ui_sink=self._on_button_event)
+                run_bridge(
+                    click, self._link,
+                    ui_sink=self._on_button_event,
+                    deduper=self._deduper,
+                )
             )
 
         await asyncio.gather(*(connect_one(d) for d in devices))
