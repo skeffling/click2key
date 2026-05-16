@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import subprocess
+import sys
 import threading
 from collections.abc import Coroutine
 from typing import Any
@@ -186,6 +188,25 @@ class App(ctk.CTk):
             command=lambda: self._submit(self._link.shift_up()),
         ).pack(side="left", padx=4)
 
+        perm_row = ctk.CTkFrame(self._debug_pane, fg_color="transparent")
+        perm_row.pack(fill="x", padx=8, pady=(0, 4))
+        is_mac = sys.platform == "darwin"
+        ctk.CTkLabel(perm_row, text="Permissions:").pack(side="left", padx=(4, 8))
+        ctk.CTkButton(
+            perm_row, text="Accessibility…", width=130,
+            command=self._open_accessibility_settings,
+            state="normal" if is_mac else "disabled",
+        ).pack(side="left", padx=4)
+        ctk.CTkButton(
+            perm_row, text="Bluetooth…", width=110,
+            command=self._open_bluetooth_settings,
+            state="normal" if is_mac else "disabled",
+        ).pack(side="left", padx=4)
+        ctk.CTkButton(
+            perm_row, text="Test keystroke (k)", width=150,
+            command=self._test_keystroke,
+        ).pack(side="left", padx=4)
+
         log_box = ctk.CTkTextbox(self._debug_pane, state="disabled")
         log_box.pack(fill="both", expand=True, padx=8, pady=(4, 8))
 
@@ -299,6 +320,44 @@ class App(ctk.CTk):
 
     def _on_scan_click(self) -> None:
         self._submit(self._scan_and_connect())
+
+    def _open_accessibility_settings(self) -> None:
+        self._open_system_settings(
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+            "Accessibility",
+        )
+
+    def _open_bluetooth_settings(self) -> None:
+        self._open_system_settings(
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Bluetooth",
+            "Bluetooth",
+        )
+
+    def _open_system_settings(self, url: str, name: str) -> None:
+        if sys.platform != "darwin":
+            log.warning("System Settings shortcuts are macOS-only")
+            return
+        log.info("Opening System Settings → %s", name)
+        try:
+            subprocess.Popen(["open", url])
+        except Exception:
+            log.exception("Failed to open System Settings")
+
+    def _test_keystroke(self) -> None:
+        log.info("Sending test keystroke 'k' in 2 seconds — focus your target window now")
+        # Give the user a beat to click into MyWhoosh / a text editor.
+        self.after(2000, self._fire_test_keystroke)
+
+    def _fire_test_keystroke(self) -> None:
+        from pynput.keyboard import Controller, KeyCode
+        try:
+            kb = Controller()
+            kb.press(KeyCode.from_char("k"))
+            kb.release(KeyCode.from_char("k"))
+            log.info("Test keystroke sent. If 'k' didn't appear in the focused app, "
+                     "Accessibility permission is probably missing.")
+        except Exception:
+            log.exception("Test keystroke failed")
 
     def _on_mode_change(self) -> None:
         new = OutputMode(self._mode_var.get())

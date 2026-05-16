@@ -15,7 +15,8 @@
       "Bash(git add *)",
       "Bash(git -c commit.gpgsign=false commit -q -m \"Add right puck button mappings; left puck has A/B/Y/Z extras\")",
       "Bash(git -c commit.gpgsign=false commit -q -m 'Dedupe cross-puck button events + clean up puck labels *)",
-      "Bash(git -c commit.gpgsign=false commit -q -m \"Compact puck rows: red/green dot + per-glyph bold flash on press\")"
+      "Bash(git -c commit.gpgsign=false commit -q -m \"Compact puck rows: red/green dot + per-glyph bold flash on press\")",
+      "Bash(git -c commit.gpgsign=false commit -q -m 'Debug pane: shortcuts to OS Accessibility/Bluetooth settings + test keystroke *)"
     ]
   }
 }
