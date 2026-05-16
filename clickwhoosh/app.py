@@ -203,6 +203,9 @@ class App(ctk.CTk):
             self.after(0, lambda: self._click_status.configure(text="Click: error"))
             return
         self.after(0, lambda: self._click_status.configure(text=f"Click: {target.name}"))
+        # Left puck owns the BLE link, so the moment we're connected it's "live".
+        # Right puck only counts as seen after we receive an event from it.
+        self.after(0, lambda: self._left_status.configure(text="connected"))
 
     # ------------------------------------------------------------------
     # Loop plumbing
