@@ -203,10 +203,11 @@ class App(ctk.CTk):
             command=self._open_bluetooth_settings,
             state="normal" if is_mac else "disabled",
         ).pack(side="left", padx=4)
-        ctk.CTkButton(
+        self._test_kb_btn = ctk.CTkButton(
             perm_row, text="Test keystroke (k)", width=150,
             command=self._test_keystroke,
-        ).pack(side="left", padx=4)
+        )
+        self._test_kb_btn.pack(side="left", padx=4)
         ctk.CTkButton(
             perm_row, text="Configure keys…", width=140,
             command=self._open_keymap_dialog,
@@ -370,10 +371,25 @@ class App(ctk.CTk):
             on_apply=keyboard.set_mapping,
         )
 
+    _TEST_COUNTDOWN_SECONDS = 4
+
     def _test_keystroke(self) -> None:
-        log.info("Sending test keystroke 'k' in 2 seconds — focus your target window now")
-        # Give the user a beat to click into MyWhoosh / a text editor.
-        self.after(2000, self._fire_test_keystroke)
+        # Clicking the button steals focus to our window, so we count down
+        # to give the user time to click into MyWhoosh (or any text field).
+        log.info(
+            "Click into the app you want to test in (MyWhoosh, Notes, anywhere "
+            "with a text field). Keystroke fires in %d seconds.",
+            self._TEST_COUNTDOWN_SECONDS,
+        )
+        self._test_kb_btn.configure(state="disabled")
+        self._test_keystroke_countdown(self._TEST_COUNTDOWN_SECONDS)
+
+    def _test_keystroke_countdown(self, remaining: int) -> None:
+        if remaining <= 0:
+            self._fire_test_keystroke()
+            return
+        self._test_kb_btn.configure(text=f"Firing in {remaining}…")
+        self.after(1000, self._test_keystroke_countdown, remaining - 1)
 
     def _fire_test_keystroke(self) -> None:
         from pynput.keyboard import Controller, KeyCode
@@ -381,10 +397,12 @@ class App(ctk.CTk):
             kb = Controller()
             kb.press(KeyCode.from_char("k"))
             kb.release(KeyCode.from_char("k"))
-            log.info("Test keystroke sent. If 'k' didn't appear in the focused app, "
-                     "Accessibility permission is probably missing.")
+            log.info("Test keystroke 'k' sent. If it didn't appear in the app "
+                     "you focused, Accessibility permission is missing.")
         except Exception:
             log.exception("Test keystroke failed")
+        finally:
+            self._test_kb_btn.configure(text="Test keystroke (k)", state="normal")
 
     def _on_mode_change(self) -> None:
         new = OutputMode(self._mode_var.get())
