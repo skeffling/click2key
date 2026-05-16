@@ -28,6 +28,29 @@ DOT_PENDING = "#d8a200"  # connected but puck identity unknown until first press
 DOT_ON = "#33aa55"
 
 
+def _accessibility_trusted() -> bool | None:
+    """Returns True/False if running on macOS and we can query the API.
+
+    None if not on macOS or the API isn't reachable. Calls Apple's
+    AXIsProcessTrusted() so this reflects the real, in-effect state of
+    Accessibility permission for this exact process — independent of what
+    appears in System Settings.
+    """
+    if sys.platform != "darwin":
+        return None
+    try:
+        import ctypes
+        import ctypes.util
+        path = ctypes.util.find_library("ApplicationServices")
+        if path is None:
+            return None
+        ax = ctypes.CDLL(path)
+        ax.AXIsProcessTrusted.restype = ctypes.c_bool
+        return bool(ax.AXIsProcessTrusted())
+    except Exception:
+        return None
+
+
 def _accessibility_target() -> str:
     """Best macOS Accessibility target for the running Python.
 
@@ -259,6 +282,12 @@ class App(ctk.CTk):
             "macOS Accessibility target (add this in System Settings):\n    %s",
             _accessibility_target(),
         )
+        trusted = _accessibility_trusted()
+        if trusted is False:
+            log.warning("Accessibility NOT granted to this Python process. "
+                        "Keyboard mode will not work until you grant it.")
+        elif trusted is True:
+            log.info("Accessibility is granted — keyboard mode should work.")
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -428,12 +457,22 @@ class App(ctk.CTk):
 
     def _fire_test_keystroke(self) -> None:
         from pynput.keyboard import Controller, KeyCode
+        trusted = _accessibility_trusted()
+        if trusted is False:
+            log.warning(
+                "Accessibility is NOT granted to this process. macOS will "
+                "silently drop the keystroke. Grant the Python.app bundle in "
+                "System Settings → Privacy → Accessibility, then fully quit "
+                "and relaunch this app."
+            )
         try:
             kb = Controller()
             kb.press(KeyCode.from_char("k"))
             kb.release(KeyCode.from_char("k"))
-            log.info("Test keystroke 'k' sent. If it didn't appear in the app "
-                     "you focused, Accessibility permission is missing.")
+            if trusted is True:
+                log.info("Test keystroke 'k' sent (Accessibility is granted).")
+            else:
+                log.info("Test keystroke 'k' attempted.")
         except Exception:
             log.exception("Test keystroke failed")
         finally:
