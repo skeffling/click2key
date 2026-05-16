@@ -76,18 +76,22 @@ class Button(enum.Enum):
 # Right puck bits will be filled in once that puck is awake and we run the
 # same mapping pass.
 BUTTON_LABELS: dict[int, tuple[Puck, Button]] = {
-    # Left puck (+ / arrows). Press order +, ↑, →, ↓, ← yielded 4, 5, 6, 7, 12.
-    4: (Puck.LEFT, Button.SHIFT_UP),
-    5: (Puck.LEFT, Button.NAV_UP),
-    6: (Puck.LEFT, Button.NAV_RIGHT),
-    7: (Puck.LEFT, Button.NAV_DOWN),
-    12: (Puck.LEFT, Button.NAV_LEFT),
-    # Right puck (− / arrows). Press order −, ↑, ↓, ←, → yielded 8, 1, 3, 0, 2.
-    8: (Puck.RIGHT, Button.SHIFT_DOWN),
-    1: (Puck.RIGHT, Button.NAV_UP),
-    3: (Puck.RIGHT, Button.NAV_DOWN),
-    0: (Puck.RIGHT, Button.NAV_LEFT),
-    2: (Puck.RIGHT, Button.NAV_RIGHT),
+    # Left puck (+ / A·B·Y·Z). Confirmed by pressing buttons by letter in
+    # order +, A, B, Y, Z which yielded bits 12, 4, 5, 6, 7.
+    # On this puck the colored buttons ARE the nav diamond:
+    #   Y (blue) = top, A (green) = right, B (magenta) = bottom, Z (orange) = left.
+    12: (Puck.LEFT, Button.SHIFT_UP),    # +
+    6:  (Puck.LEFT, Button.NAV_UP),       # Y, top
+    4:  (Puck.LEFT, Button.NAV_RIGHT),    # A, right
+    5:  (Puck.LEFT, Button.NAV_DOWN),     # B, bottom
+    7:  (Puck.LEFT, Button.NAV_LEFT),     # Z, left
+    # Right puck (− / arrows). Confirmed by pressing −, ↑, ↓, ←, → which
+    # yielded bits 8, 3, 1, 2, 0.
+    8:  (Puck.RIGHT, Button.SHIFT_DOWN),
+    3:  (Puck.RIGHT, Button.NAV_UP),
+    1:  (Puck.RIGHT, Button.NAV_DOWN),
+    2:  (Puck.RIGHT, Button.NAV_LEFT),
+    0:  (Puck.RIGHT, Button.NAV_RIGHT),
 }
 
 
