@@ -195,6 +195,7 @@ class ClickV2:
     # ------------------------------------------------------------------
 
     _last_bitmap: int | None = None
+    _last_battery: int | None = None
 
     def _on_async_notify(self, _char, data: bytearray) -> None:
         payload = bytes(data)
@@ -204,6 +205,13 @@ class ClickV2:
         if len(payload) >= 3 and payload[0] == 0x23 and payload[1] == 0x08:
             bitmap, _ = _read_varint(payload, 2)
             self._handle_bitmap(bitmap)
+            return
+        # Battery poll: 0x19 0x10 <varint percent>. Pucks send this every ~5s.
+        if len(payload) >= 3 and payload[0] == 0x19 and payload[1] == 0x10:
+            pct, _ = _read_varint(payload, 2)
+            if pct != self._last_battery:
+                log.info("Battery: %d%%", pct)
+                self._last_battery = pct
             return
         log.info("ASYNC RX (%d bytes, unhandled): %s", len(payload), payload.hex())
 
