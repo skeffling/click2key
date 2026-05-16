@@ -42,7 +42,9 @@ class App(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
         self.title("clickwhoosh")
-        self.geometry("620x520")
+        self._collapsed_geometry = "560x260"
+        self._expanded_geometry = "640x560"
+        self.geometry(self._collapsed_geometry)
 
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
@@ -79,8 +81,12 @@ class App(ctk.CTk):
         self._click_status = ctk.CTkLabel(row, text="Click: disconnected")
         self._click_status.pack(side="left", padx=8)
 
-        scan_btn = ctk.CTkButton(row, text="Scan + Connect Click", command=self._on_scan_click)
-        scan_btn.pack(side="right", padx=8)
+        self._scan_btn = ctk.CTkButton(
+            row, text="Scan + Connect", width=160, command=self._on_scan_click
+        )
+        self._scan_btn.pack(side="right", padx=8)
+        self._scan_spinner = ctk.CTkProgressBar(row, mode="indeterminate", width=120)
+        # Spinner is created hidden; only pack when scanning.
 
         pucks_row = ctk.CTkFrame(self)
         pucks_row.pack(fill="x", padx=12, pady=(0, 8))
@@ -110,20 +116,33 @@ class App(ctk.CTk):
 
         self._seen_pucks: set[Puck] = set()
 
-        debug_row = ctk.CTkFrame(self)
-        debug_row.pack(fill="x", padx=12, pady=(0, 8))
-        ctk.CTkLabel(debug_row, text="Debug:").pack(side="left", padx=(8, 4))
+        # Toggle row — the only thing visible from the debug pane when collapsed.
+        toggle_row = ctk.CTkFrame(self, fg_color="transparent")
+        toggle_row.pack(fill="x", padx=12, pady=(0, 8))
+        self._debug_toggle = ctk.CTkButton(
+            toggle_row, text="Show debug ▾", width=130, height=28,
+            fg_color="transparent", border_width=1,
+            command=self._toggle_debug_pane,
+        )
+        self._debug_toggle.pack(side="right")
+
+        # Debug pane — created but not packed; toggle pack/pack_forget below.
+        self._debug_pane = ctk.CTkFrame(self)
+
+        debug_buttons = ctk.CTkFrame(self._debug_pane, fg_color="transparent")
+        debug_buttons.pack(fill="x", padx=8, pady=(8, 4))
+        ctk.CTkLabel(debug_buttons, text="Send to MyWhoosh:").pack(side="left", padx=(4, 8))
         ctk.CTkButton(
-            debug_row, text="Shift Down", width=110,
+            debug_buttons, text="Shift Down", width=110,
             command=lambda: self._submit(self._link.shift_down()),
         ).pack(side="left", padx=4)
         ctk.CTkButton(
-            debug_row, text="Shift Up", width=110,
+            debug_buttons, text="Shift Up", width=110,
             command=lambda: self._submit(self._link.shift_up()),
         ).pack(side="left", padx=4)
 
-        log_box = ctk.CTkTextbox(self, state="disabled")
-        log_box.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        log_box = ctk.CTkTextbox(self._debug_pane, state="disabled")
+        log_box.pack(fill="both", expand=True, padx=8, pady=(4, 8))
 
         handler = TkLogHandler(log_box)
         handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s — %(message)s", "%H:%M:%S"))
@@ -131,7 +150,30 @@ class App(ctk.CTk):
         root_log.setLevel(logging.INFO)
         root_log.addHandler(handler)
 
+        self._debug_visible = False
+
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _set_scanning(self, scanning: bool) -> None:
+        if scanning:
+            self._scan_btn.configure(text="Scanning…", state="disabled")
+            self._scan_spinner.pack(side="right", padx=(0, 8))
+            self._scan_spinner.start()
+        else:
+            self._scan_spinner.stop()
+            self._scan_spinner.pack_forget()
+            self._scan_btn.configure(text="Scan + Connect", state="normal")
+
+    def _toggle_debug_pane(self) -> None:
+        if self._debug_visible:
+            self._debug_pane.pack_forget()
+            self._debug_toggle.configure(text="Show debug ▾")
+            self.geometry(self._collapsed_geometry)
+        else:
+            self._debug_pane.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+            self._debug_toggle.configure(text="Hide debug ▴")
+            self.geometry(self._expanded_geometry)
+        self._debug_visible = not self._debug_visible
 
     # ------------------------------------------------------------------
     # Callbacks
@@ -165,6 +207,7 @@ class App(ctk.CTk):
 
     async def _start_services(self) -> None:
         await self._link.start()
+        await self._scan_and_connect()
 
     def _on_button_event(self, event: ButtonEvent) -> None:
         # Runs on the asyncio thread. Marshal UI updates onto Tk's main loop.
@@ -185,8 +228,12 @@ class App(ctk.CTk):
         # the raw "bitN (verb)" line still shows up in the log textbox.
 
     async def _scan_and_connect(self) -> None:
+        self.after(0, self._set_scanning, True)
         log.info("Scanning for Click V2…")
-        devices = await ClickV2.scan()
+        try:
+            devices = await ClickV2.scan()
+        finally:
+            self.after(0, self._set_scanning, False)
         if not devices:
             log.warning("No Click devices found")
             self.after(0, lambda: self._click_status.configure(text="Click: not found"))
