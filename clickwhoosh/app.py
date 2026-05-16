@@ -94,7 +94,7 @@ class App(ctk.CTk):
         self._left_last.grid(row=2, column=0, sticky="w", padx=8, pady=(0, 6))
 
         self._right_title = ctk.CTkLabel(
-            pucks_row, text="Right puck  (− / A·Y·Z·B)",
+            pucks_row, text="Right puck  (− / arrows)",
             font=ctk.CTkFont(weight="bold"),
         )
         self._right_title.grid(row=0, column=1, sticky="w", padx=8, pady=(6, 0))

@@ -54,7 +54,7 @@ def _read_varint(buf: bytes, start: int) -> tuple[int, int]:
 
 class Puck(enum.Enum):
     LEFT = "left"     # + and the 4 arrow buttons
-    RIGHT = "right"   # − and A / Y / Z / B
+    RIGHT = "right"   # − and the 4 arrow buttons
     UNKNOWN = "unknown"
 
 
@@ -65,10 +65,6 @@ class Button(enum.Enum):
     NAV_DOWN = "nav_down"
     NAV_LEFT = "nav_left"
     NAV_RIGHT = "nav_right"
-    A = "A"
-    B = "B"
-    Y = "Y"
-    Z = "Z"
 
 
 # Display label for each button. Identified empirically; press order on the
