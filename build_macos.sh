@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build dist/Whoosh Clicker.app. Run from repo root with the venv active
+# Build dist/Click2Key.app. Run from repo root with the venv active
 # (or pass the path to a venv as the first argument).
 set -euo pipefail
 
@@ -15,8 +15,8 @@ if [[ ! -x "$PY" ]]; then
 fi
 
 "$PY" -m pip install -q -e ".[dev]"
-"$PY" -m PyInstaller --noconfirm clickwhoosh.spec
+"$PY" -m PyInstaller --noconfirm click2key.spec
 
 echo
-echo "Built: dist/Whoosh Clicker.app"
+echo "Built: dist/Click2Key.app"
 echo "Move it to /Applications, then grant Accessibility in System Settings."

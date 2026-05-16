@@ -105,11 +105,11 @@ DEFAULTS_BY_BUTTON: dict[Button, str] = {
 
 def _config_dir() -> Path:
     if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "clickwhoosh"
+        return Path.home() / "Library" / "Application Support" / "click2key"
     if sys.platform.startswith("win"):
         base = os.environ.get("APPDATA") or str(Path.home())
-        return Path(base) / "clickwhoosh"
-    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "clickwhoosh"
+        return Path(base) / "click2key"
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "click2key"
 
 
 def config_path() -> Path:
@@ -117,7 +117,7 @@ def config_path() -> Path:
 
 
 def load_keymap() -> dict[Button, Key | KeyCode]:
-    """Load mapping from config file, falling back to MyWhoosh defaults."""
+    """Load mapping from config file, falling back to built-in defaults."""
     path = config_path()
     raw: dict[str, str] = {}
     if path.exists():

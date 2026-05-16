@@ -5,7 +5,7 @@ Each Click button (SHIFT_UP, SHIFT_DOWN, NAV_*) has:
   - an editable Entry showing the current key (e.g. 'k', 'up', 'space')
 
 Custom keys: type any single character or a special name from
-clickwhoosh.keymap._SPECIAL_KEYS. Picking a preset fills the entry.
+click2key.keymap._SPECIAL_KEYS. Picking a preset fills the entry.
 """
 
 from __future__ import annotations

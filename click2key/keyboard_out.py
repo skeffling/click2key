@@ -1,11 +1,8 @@
 """Keyboard-simulation output. Press/release keys when buttons are pressed.
 
-Used as an alternative to the MyWhoosh Link TCP server: synthesizes keyboard
-input to whichever app currently has focus. Requires the focused window to
-be MyWhoosh for the shifts to count.
-
-macOS: first run will prompt for Accessibility permission. Without it,
-key events are silently dropped by the OS.
+Synthesizes keyboard input to whichever app currently has focus. macOS
+requires Accessibility permission; without it, key events are silently
+dropped by the OS.
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 @echo off
-REM Build dist\Whoosh Clicker\Whoosh Clicker.exe. Run from repo root.
+REM Build dist\Click2Key\Click2Key.exe. Run from repo root.
 REM Assumes a venv at .venv\ (run `py -m venv .venv` once if missing).
 
 setlocal
@@ -13,9 +13,9 @@ if not exist "%PY%" (
 "%PY%" -m pip install -q -e ".[dev]"
 if errorlevel 1 exit /b 1
 
-"%PY%" -m PyInstaller --noconfirm clickwhoosh.spec
+"%PY%" -m PyInstaller --noconfirm click2key.spec
 if errorlevel 1 exit /b 1
 
 echo.
-echo Built: dist\Whoosh Clicker\Whoosh Clicker.exe
-echo Distribute the entire dist\Whoosh Clicker folder; the .exe needs _internal\ next to it.
+echo Built: dist\Click2Key\Click2Key.exe
+echo Distribute the entire dist\Click2Key folder; the .exe needs _internal\ next to it.

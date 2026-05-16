@@ -1,7 +1,7 @@
 import time
 
-from clickwhoosh.bridge import EventDeduper
-from clickwhoosh.click_v2 import Button, ButtonEvent, Puck
+from click2key.bridge import EventDeduper
+from click2key.click_v2 import Button, ButtonEvent, Puck
 
 
 def _ev(bit: int, is_down: bool) -> ButtonEvent:

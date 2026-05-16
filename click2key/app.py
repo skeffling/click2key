@@ -1,9 +1,8 @@
 """CustomTkinter UI shell.
 
-Top: header + two puck cards (dots flip grey→amber→green; per-glyph bold
-flash on press). Below: MyWhoosh Link status + Scan button, Link/Keyboard
-mode radio, a hint line, and a collapsible debug pane (log, permission
-shortcuts, test box, keymap dialog).
+Top: header + Scan button, two puck cards (dots flip grey→amber→green;
+per-glyph bold flash on press). Below: a hint line and a collapsible
+debug pane (log, permission shortcuts, test box, keymap dialog).
 
 The asyncio event loop runs in a background thread; UI callbacks marshal
 work onto it via asyncio.run_coroutine_threadsafe.
@@ -25,11 +24,10 @@ from typing import Any
 import customtkinter as ctk
 from PIL import Image
 
-from .bridge import Bridge, OutputMode, run_bridge
+from .bridge import Bridge, run_bridge
 from .click_v2 import Button, ButtonEvent, ClickV2, Puck
 from .keyboard_out import KeyboardOutput
 from .keymap_dialog import KeymapDialog
-from .whoosh_link import LINK_PORT, WhooshLinkServer
 
 DOT_OFF = "#888888"
 DOT_PENDING = "#d8a200"  # connected but puck identity unknown until first press
@@ -178,9 +176,9 @@ class TkLogHandler(logging.Handler):
 class App(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Whoosh Clicker")
-        self._collapsed_geometry = "640x460"
-        self._expanded_geometry = "720x760"
+        self.title("Click2Key")
+        self._collapsed_geometry = "640x400"
+        self._expanded_geometry = "720x700"
         self.geometry(self._collapsed_geometry)
 
         self._loop = asyncio.new_event_loop()
@@ -190,20 +188,15 @@ class App(ctk.CTk):
         # One ClickV2 per BLE-connected puck. Keyed by device address.
         self._clicks: dict[str, ClickV2] = {}
         self._bridge_tasks: dict[str, asyncio.Task] = {}
-        self._link = WhooshLinkServer(on_connection_change=self._on_link_state)
         self._bridge = Bridge(
-            link=self._link,
             keyboard=KeyboardOutput(),
             ui_sink=self._on_button_event,
         )
 
         # Per-puck UI state (populated in _build_ui); tri-state dot logic
-        # lives in _refresh_state. _link_connected mirrors the Link server
-        # callback so _refresh_state can compose the hint without polling.
+        # lives in _refresh_state.
         self._pucks: dict[Puck, _PuckUi] = {}
-        self._link_connected = False
         self._last_hint = ""
-        self._last_subtitle = ""
         # Reusable fonts so the per-press flash doesn't allocate.
         self._normal_font: ctk.CTkFont | None = None
         self._bold_font: ctk.CTkFont | None = None
@@ -236,7 +229,7 @@ class App(ctk.CTk):
                 side="left", padx=(0, 8),
             )
         ctk.CTkLabel(
-            top_bar, text="Whoosh Clicker",
+            top_bar, text="Click2Key",
             font=ctk.CTkFont(size=20, weight="bold"),
         ).pack(side="left")
         self._scan_btn = ctk.CTkButton(
@@ -248,8 +241,10 @@ class App(ctk.CTk):
             top_bar, mode="indeterminate", width=110,
         )
 
-        self._subtitle = ctk.CTkLabel(self, text="")
-        self._subtitle.pack(pady=(2, 0))
+        ctk.CTkLabel(
+            self, text="Zwift Click V2  →  keyboard shortcuts",
+            text_color="gray60",
+        ).pack(pady=(2, 0))
 
         # First-run setup hint. Hidden once both pucks are identified.
         self._setup_panel = ctk.CTkFrame(self)
@@ -262,7 +257,7 @@ class App(ctk.CTk):
         ctk.CTkLabel(
             self._setup_panel,
             text=(
-                "1. Wake both Click pucks (long-press a button until the LED is solid blue).\n"
+                "1. Wake both Click pucks (long-press any button until the LED is solid blue).\n"
                 "2. Click Scan + Connect.\n"
                 "3. Press any button on each puck so we can identify which is which.\n\n"
                 "If a puck stops responding after ~60 seconds, pair it once in the free Zwift\n"
@@ -283,30 +278,6 @@ class App(ctk.CTk):
         self._pucks_row.grid_columnconfigure(0, weight=1)
         self._pucks_row.grid_columnconfigure(1, weight=1)
 
-        # Status row: MyWhoosh link state (hidden in Keyboard mode).
-        status_frame = ctk.CTkFrame(self, fg_color="transparent")
-        status_frame.pack(fill="x", padx=12, pady=(0, 6))
-        self._link_status = ctk.CTkLabel(
-            status_frame, text="MyWhoosh: waiting…", anchor="w",
-            font=ctk.CTkFont(weight="bold"),
-        )
-        self._link_status.pack(side="left", padx=8)
-
-        mode_row = ctk.CTkFrame(self, fg_color="transparent")
-        mode_row.pack(fill="x", padx=12, pady=(0, 2))
-        ctk.CTkLabel(mode_row, text="Output:").pack(side="left", padx=(8, 8))
-        self._mode_var = ctk.StringVar(value=OutputMode.LINK.value)
-        ctk.CTkRadioButton(
-            mode_row, text="Link (MyWhoosh TCP)",
-            value=OutputMode.LINK.value, variable=self._mode_var,
-            command=self._on_mode_change,
-        ).pack(side="left", padx=4)
-        ctk.CTkRadioButton(
-            mode_row, text="Keyboard (focused window)",
-            value=OutputMode.KEYBOARD.value, variable=self._mode_var,
-            command=self._on_mode_change,
-        ).pack(side="left", padx=4)
-
         self._hint_label = ctk.CTkLabel(
             self, text="", anchor="w", text_color="gray60",
         )
@@ -324,20 +295,8 @@ class App(ctk.CTk):
         # Debug pane — created but not packed; toggle pack/pack_forget below.
         self._debug_pane = ctk.CTkFrame(self)
 
-        debug_buttons = ctk.CTkFrame(self._debug_pane, fg_color="transparent")
-        debug_buttons.pack(fill="x", padx=8, pady=(8, 4))
-        ctk.CTkLabel(debug_buttons, text="Send to MyWhoosh:").pack(side="left", padx=(4, 8))
-        ctk.CTkButton(
-            debug_buttons, text="Shift Down", width=110,
-            command=lambda: self._submit(self._link.shift_down()),
-        ).pack(side="left", padx=4)
-        ctk.CTkButton(
-            debug_buttons, text="Shift Up", width=110,
-            command=lambda: self._submit(self._link.shift_up()),
-        ).pack(side="left", padx=4)
-
         perm_row = ctk.CTkFrame(self._debug_pane, fg_color="transparent")
-        perm_row.pack(fill="x", padx=8, pady=(0, 4))
+        perm_row.pack(fill="x", padx=8, pady=(8, 4))
         is_mac = sys.platform == "darwin"
         ctk.CTkLabel(perm_row, text="Permissions:").pack(side="left", padx=(4, 8))
         ctk.CTkButton(
@@ -391,10 +350,10 @@ class App(ctk.CTk):
         )
         trusted = _accessibility_trusted()
         if trusted is False:
-            log.warning("Accessibility NOT granted to this Python process. "
-                        "Keyboard mode will not work until you grant it.")
+            log.warning("Accessibility NOT granted. Keystrokes will be "
+                        "silently dropped by macOS until you grant it.")
         elif trusted is True:
-            log.info("Accessibility is granted — keyboard mode should work.")
+            log.info("Accessibility is granted — keystrokes will fire.")
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -429,17 +388,8 @@ class App(ctk.CTk):
         return _PuckUi(dot=dot, glyphs=glyphs, hint=hint)
 
     def _refresh_state(self) -> None:
-        """Recompute dot colors, subtitle and hint. Skips no-op .configure() calls."""
+        """Recompute dot colors and hint. Skips no-op .configure() calls."""
         ble_count = len(self._clicks)
-        is_keyboard = self._bridge.mode is OutputMode.KEYBOARD
-        method = "Keyboard" if is_keyboard else "OpenBikeControl"
-        subtitle = f"Click 2  →  Whoosh Clicker  →  MyWhoosh  ({method})"
-
-        # Link status is meaningless in keyboard mode — hide it then.
-        if is_keyboard and self._link_status.winfo_ismapped():
-            self._link_status.pack_forget()
-        elif not is_keyboard and not self._link_status.winfo_ismapped():
-            self._link_status.pack(side="left", padx=8)
 
         # Hide the setup panel once both pucks are identified.
         all_identified = all(ui.identified for ui in self._pucks.values())
@@ -447,9 +397,6 @@ class App(ctk.CTk):
             self._setup_panel.pack_forget()
         elif not all_identified and not self._setup_panel.winfo_ismapped():
             self._setup_panel.pack(fill="x", padx=12, pady=(8, 0), before=self._pucks_row)
-        if subtitle != self._last_subtitle:
-            self._subtitle.configure(text=subtitle)
-            self._last_subtitle = subtitle
 
         for ui in self._pucks.values():
             if ui.identified:
@@ -465,12 +412,10 @@ class App(ctk.CTk):
                 ui.hint.configure(text=hint_text)
                 ui.last_hint = hint_text
 
-        if self._bridge.mode is OutputMode.KEYBOARD:
-            hint = "Keyboard mode — keep MyWhoosh focused while riding."
-        elif not self._link_connected:
-            hint = "Open MyWhoosh and start a ride — it will connect here."
+        if all_identified:
+            hint = "Ready. Keystrokes go to whichever app has focus."
         else:
-            hint = "MyWhoosh connected. Pedal away."
+            hint = "Bring your target app to focus before pressing puck buttons."
         if hint != self._last_hint:
             self._hint_label.configure(text=hint)
             self._last_hint = hint
@@ -559,10 +504,10 @@ class App(ctk.CTk):
 
     def _test_keystroke(self) -> None:
         # Clicking the button steals focus to our window, so we count down
-        # to give the user time to click into MyWhoosh (or any text field).
+        # to give the user time to click into their target app.
         log.info(
-            "Click into the app you want to test in (MyWhoosh, Notes, anywhere "
-            "with a text field). Keystroke fires in %d seconds.",
+            "Click into the app you want to test in (Notes, anywhere with "
+            "a text field). Keystroke fires in %d seconds.",
             self._TEST_COUNTDOWN_SECONDS,
         )
         self._test_kb_btn.configure(state="disabled")
@@ -597,28 +542,12 @@ class App(ctk.CTk):
         finally:
             self._test_kb_btn.configure(text="Test keystroke (k)", state="normal")
 
-    def _on_mode_change(self) -> None:
-        new = OutputMode(self._mode_var.get())
-        self._bridge.mode = new
-        log.info("Output mode → %s", new.value)
-        self._refresh_state()
-
-    def _on_link_state(self, connected: bool) -> None:
-        def apply() -> None:
-            self._link_connected = connected
-            self._link_status.configure(
-                text="MyWhoosh: connected" if connected else "MyWhoosh: waiting…"
-            )
-            self._refresh_state()
-        self.after(0, apply)
-
     def _on_close(self) -> None:
         if self._log_handler is not None:
             logging.getLogger().removeHandler(self._log_handler)
             self._log_handler = None
 
         async def shutdown() -> None:
-            await self._link.stop()
             for task in self._bridge_tasks.values():
                 task.cancel()
             for click in self._clicks.values():
@@ -636,7 +565,6 @@ class App(ctk.CTk):
     # ------------------------------------------------------------------
 
     async def _start_services(self) -> None:
-        await self._link.start()
         await self._scan_and_connect()
 
     def _on_button_event(self, event: ButtonEvent) -> None:

@@ -1,12 +1,11 @@
 [project]
-name = "clickwhoosh"
+name = "click2key"
 version = "0.1.0"
-description = "Bridge a Zwift Click V2 controller to MyWhoosh via the Link protocol"
+description = "Turn Zwift Click V2 button presses into keyboard shortcuts"
 requires-python = ">=3.10"
 dependencies = [
     "bleak>=0.22",
     "customtkinter>=5.2",
-    "zeroconf>=0.131",
     "pynput>=1.7",
     "Pillow>=10.0",
 ]
@@ -15,11 +14,11 @@ dependencies = [
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "pyinstaller>=6.10"]
 
 [project.scripts]
-clickwhoosh = "clickwhoosh.app:main"
+click2key = "click2key.app:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["clickwhoosh*"]
+include = ["click2key*"]
