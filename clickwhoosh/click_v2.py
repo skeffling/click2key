@@ -61,14 +61,14 @@ class Puck(enum.Enum):
 class Button(enum.Enum):
     SHIFT_UP = "shift_up"      # + on left puck
     SHIFT_DOWN = "shift_down"  # − on right puck
+    # Nav diamond. On the + puck these are colored corner buttons:
+    #   Y (blue) = NAV_UP, A (green) = NAV_RIGHT,
+    #   B (magenta) = NAV_DOWN, Z (orange) = NAV_LEFT.
+    # On the − puck they are plain arrow icons.
     NAV_UP = "nav_up"
     NAV_DOWN = "nav_down"
     NAV_LEFT = "nav_left"
     NAV_RIGHT = "nav_right"
-    A = "A"
-    B = "B"
-    Y = "Y"
-    Z = "Z"
 
 
 # Display label for each button. Identified empirically; press order on the

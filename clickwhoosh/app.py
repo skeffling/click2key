@@ -48,9 +48,10 @@ class App(ctk.CTk):
         self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
         self._loop_thread.start()
 
-        self._click = ClickV2()
+        # One ClickV2 per BLE-connected puck. Keyed by device address.
+        self._clicks: dict[str, ClickV2] = {}
+        self._bridge_tasks: dict[str, asyncio.Task] = {}
         self._link = WhooshLinkServer(on_connection_change=self._on_link_state)
-        self._bridge_task: asyncio.Task | None = None
 
         self._build_ui()
         self._submit(self._start_services())
@@ -145,9 +146,10 @@ class App(ctk.CTk):
     def _on_close(self) -> None:
         async def shutdown() -> None:
             await self._link.stop()
-            await self._click.disconnect()
-            if self._bridge_task is not None:
-                self._bridge_task.cancel()
+            for task in self._bridge_tasks.values():
+                task.cancel()
+            for click in self._clicks.values():
+                await click.disconnect()
         fut = asyncio.run_coroutine_threadsafe(shutdown(), self._loop)
         try:
             fut.result(timeout=3)
@@ -162,9 +164,6 @@ class App(ctk.CTk):
 
     async def _start_services(self) -> None:
         await self._link.start()
-        self._bridge_task = asyncio.create_task(
-            run_bridge(self._click, self._link, ui_sink=self._on_button_event)
-        )
 
     def _on_button_event(self, event: ButtonEvent) -> None:
         # Runs on the asyncio thread. Marshal UI updates onto Tk's main loop.
@@ -181,11 +180,8 @@ class App(ctk.CTk):
         elif puck is Puck.RIGHT:
             self._right_status.configure(text="connected")
             self._right_last.configure(text=line)
-        else:
-            # Unknown puck — show on both rows so the user can identify it
-            # during the mapping pass.
-            target = self._left_last if "bit" in event.label else self._right_last
-            target.configure(text=f"{event.label} ({verb}) — unmapped")
+        # Unmapped bits: leave puck status alone (we can't tell which puck);
+        # the raw "bitN (verb)" line still shows up in the log textbox.
 
     async def _scan_and_connect(self) -> None:
         log.info("Scanning for Click V2…")
@@ -194,18 +190,29 @@ class App(ctk.CTk):
             log.warning("No Click devices found")
             self.after(0, lambda: self._click_status.configure(text="Click: not found"))
             return
-        target = devices[0]
-        log.info("Found %d device(s); using %s", len(devices), target.name)
-        try:
-            await self._click.connect(target)
-        except Exception:
-            log.exception("Connect failed")
-            self.after(0, lambda: self._click_status.configure(text="Click: error"))
-            return
-        self.after(0, lambda: self._click_status.configure(text=f"Click: {target.name}"))
-        # Left puck owns the BLE link, so the moment we're connected it's "live".
-        # Right puck only counts as seen after we receive an event from it.
-        self.after(0, lambda: self._left_status.configure(text="connected"))
+        log.info("Found %d device(s); connecting to all", len(devices))
+
+        async def connect_one(dev) -> None:
+            if dev.address in self._clicks:
+                log.info("Already connected to %s; skipping", dev.address)
+                return
+            click = ClickV2()
+            try:
+                await click.connect(dev)
+            except Exception:
+                log.exception("Connect failed for %s", dev.address)
+                return
+            self._clicks[dev.address] = click
+            self._bridge_tasks[dev.address] = asyncio.create_task(
+                run_bridge(click, self._link, ui_sink=self._on_button_event)
+            )
+
+        await asyncio.gather(*(connect_one(d) for d in devices))
+
+        n = len(self._clicks)
+        self.after(0, lambda: self._click_status.configure(
+            text=f"Click: {n} puck(s) connected"
+        ))
 
     # ------------------------------------------------------------------
     # Loop plumbing
