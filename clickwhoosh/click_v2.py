@@ -65,6 +65,10 @@ class Button(enum.Enum):
     NAV_DOWN = "nav_down"
     NAV_LEFT = "nav_left"
     NAV_RIGHT = "nav_right"
+    A = "A"
+    B = "B"
+    Y = "Y"
+    Z = "Z"
 
 
 # Display label for each button. Identified empirically; press order on the
@@ -72,11 +76,18 @@ class Button(enum.Enum):
 # Right puck bits will be filled in once that puck is awake and we run the
 # same mapping pass.
 BUTTON_LABELS: dict[int, tuple[Puck, Button]] = {
+    # Left puck (+ / arrows). Press order +, ↑, →, ↓, ← yielded 4, 5, 6, 7, 12.
     4: (Puck.LEFT, Button.SHIFT_UP),
     5: (Puck.LEFT, Button.NAV_UP),
     6: (Puck.LEFT, Button.NAV_RIGHT),
     7: (Puck.LEFT, Button.NAV_DOWN),
     12: (Puck.LEFT, Button.NAV_LEFT),
+    # Right puck (− / arrows). Press order −, ↑, ↓, ←, → yielded 8, 1, 3, 0, 2.
+    8: (Puck.RIGHT, Button.SHIFT_DOWN),
+    1: (Puck.RIGHT, Button.NAV_UP),
+    3: (Puck.RIGHT, Button.NAV_DOWN),
+    0: (Puck.RIGHT, Button.NAV_LEFT),
+    2: (Puck.RIGHT, Button.NAV_RIGHT),
 }
 
 
