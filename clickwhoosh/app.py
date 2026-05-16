@@ -225,6 +225,14 @@ class App(ctk.CTk):
         self._debug_visible = False
         self._refresh_state()
 
+        # Now that the Tk log handler is in place, log the Python path so the
+        # user can find it in the debug pane (not just terminal stderr).
+        import os
+        log.info(
+            "Python binary (use for macOS Accessibility permission):\n    %s",
+            os.path.realpath(sys.executable),
+        )
+
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build_puck_row(
@@ -501,11 +509,6 @@ class App(ctk.CTk):
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
-    import os
-    log.info(
-        "Python binary (use this for macOS Accessibility permission):\n    %s",
-        os.path.realpath(sys.executable),
-    )
     app = App()
     app.mainloop()
 
