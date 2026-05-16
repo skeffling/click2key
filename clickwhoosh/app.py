@@ -179,8 +179,8 @@ class App(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Whoosh Clicker")
-        self._collapsed_geometry = "640x320"
-        self._expanded_geometry = "720x620"
+        self._collapsed_geometry = "640x460"
+        self._expanded_geometry = "720x760"
         self.geometry(self._collapsed_geometry)
 
         self._loop = asyncio.new_event_loop()
@@ -224,12 +224,12 @@ class App(ctk.CTk):
         # Top bar: icon + title on the left, Scan+Connect on the right.
         top_bar = ctk.CTkFrame(self, fg_color="transparent")
         top_bar.pack(fill="x", padx=12, pady=(10, 0))
-        icon_path = _asset("title_icon.png")
-        if icon_path is not None:
-            pil_icon = Image.open(icon_path)
-            # CTkImage scales correctly on HiDPI and respects appearance mode.
+        light_icon = _asset("title_icon.png")
+        dark_icon = _asset("title_icon_dark.png") or light_icon
+        if light_icon is not None:
             self._title_icon = ctk.CTkImage(
-                light_image=pil_icon, dark_image=pil_icon,
+                light_image=Image.open(light_icon),
+                dark_image=Image.open(dark_icon) if dark_icon else Image.open(light_icon),
                 size=(28, 28),
             )
             ctk.CTkLabel(top_bar, text="", image=self._title_icon).pack(
@@ -251,15 +251,37 @@ class App(ctk.CTk):
         self._subtitle = ctk.CTkLabel(self, text="")
         self._subtitle.pack(pady=(2, 0))
 
+        # First-run setup hint. Hidden once both pucks are identified.
+        self._setup_panel = ctk.CTkFrame(self)
+        ctk.CTkLabel(
+            self._setup_panel,
+            text="Setup",
+            font=ctk.CTkFont(weight="bold"),
+            anchor="w",
+        ).pack(fill="x", padx=12, pady=(8, 0))
+        ctk.CTkLabel(
+            self._setup_panel,
+            text=(
+                "1. Wake both Click pucks (long-press a button until the LED is solid blue).\n"
+                "2. Click Scan + Connect.\n"
+                "3. Press any button on each puck so we can identify which is which.\n\n"
+                "If a puck stops responding after ~60 seconds, pair it once in the free Zwift\n"
+                "app and ride briefly — this permanently fixes the silent-puck issue."
+            ),
+            justify="left",
+            anchor="w",
+        ).pack(fill="x", padx=12, pady=(0, 8))
+        self._setup_panel.pack(fill="x", padx=12, pady=(8, 0))
+
         # Two columns of puck cards.
         self._normal_font = ctk.CTkFont()
         self._bold_font = ctk.CTkFont(weight="bold")
-        pucks_row = ctk.CTkFrame(self)
-        pucks_row.pack(fill="x", padx=12, pady=(8, 8))
+        self._pucks_row = ctk.CTkFrame(self)
+        self._pucks_row.pack(fill="x", padx=12, pady=(8, 8))
         for column, (puck, (name, layout)) in enumerate(_LAYOUTS.items()):
-            self._pucks[puck] = self._build_puck_row(pucks_row, name, layout, column)
-        pucks_row.grid_columnconfigure(0, weight=1)
-        pucks_row.grid_columnconfigure(1, weight=1)
+            self._pucks[puck] = self._build_puck_row(self._pucks_row, name, layout, column)
+        self._pucks_row.grid_columnconfigure(0, weight=1)
+        self._pucks_row.grid_columnconfigure(1, weight=1)
 
         # Status row: MyWhoosh link state (hidden in Keyboard mode).
         status_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -418,6 +440,13 @@ class App(ctk.CTk):
             self._link_status.pack_forget()
         elif not is_keyboard and not self._link_status.winfo_ismapped():
             self._link_status.pack(side="left", padx=8)
+
+        # Hide the setup panel once both pucks are identified.
+        all_identified = all(ui.identified for ui in self._pucks.values())
+        if all_identified and self._setup_panel.winfo_ismapped():
+            self._setup_panel.pack_forget()
+        elif not all_identified and not self._setup_panel.winfo_ismapped():
+            self._setup_panel.pack(fill="x", padx=12, pady=(8, 0), before=self._pucks_row)
         if subtitle != self._last_subtitle:
             self._subtitle.configure(text=subtitle)
             self._last_subtitle = subtitle

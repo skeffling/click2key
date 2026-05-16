@@ -20,7 +20,12 @@ done
 
 iconutil -c icns "$ICONSET" -o assets/icon.icns
 
-# Small PNG for the in-window title bar (Tk's PhotoImage handles PNG natively).
+# Small PNGs for the in-window title bar. The white variant is used in
+# dark mode via CTkImage(dark_image=...).
 sips -z 28 28 "$SRC" --out assets/title_icon.png >/dev/null
-
-echo "Built assets/icon.icns and assets/title_icon.png"
+if [[ -f "logo-white.png" ]]; then
+    sips -z 28 28 logo-white.png --out assets/title_icon_dark.png >/dev/null
+    echo "Built assets/icon.icns, assets/title_icon.png, assets/title_icon_dark.png"
+else
+    echo "Built assets/icon.icns and assets/title_icon.png (no logo-white.png — title icon won't switch in dark mode)"
+fi

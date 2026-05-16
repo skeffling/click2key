@@ -19,7 +19,8 @@ a = Analysis(
     # dynamically. Both need their data files explicitly collected.
     datas=collect_data_files('customtkinter')
         + collect_data_files('bleak')
-        + [('assets/title_icon.png', 'assets')],
+        + [('assets/title_icon.png', 'assets'),
+           ('assets/title_icon_dark.png', 'assets')],
     hiddenimports=['pynput.keyboard._darwin', 'pynput.mouse._darwin',
                    'pynput.keyboard._win32', 'pynput.mouse._win32'],
     hookspath=[],
