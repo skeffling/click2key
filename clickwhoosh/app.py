@@ -501,6 +501,11 @@ class App(ctk.CTk):
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    import os
+    log.info(
+        "Python binary (use this for macOS Accessibility permission):\n    %s",
+        os.path.realpath(sys.executable),
+    )
     app = App()
     app.mainloop()
 
