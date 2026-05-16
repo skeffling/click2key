@@ -1,6 +1,10 @@
 """CustomTkinter UI shell.
 
-Three columns of state: MyWhoosh Link, Click V2, and a scrolling log.
+Top: header + two puck cards (dots flip grey→amber→green; per-glyph bold
+flash on press). Below: MyWhoosh Link status + Scan button, Link/Keyboard
+mode radio, a hint line, and a collapsible debug pane (log, permission
+shortcuts, test box, keymap dialog).
+
 The asyncio event loop runs in a background thread; UI callbacks marshal
 work onto it via asyncio.run_coroutine_threadsafe.
 """
@@ -13,6 +17,7 @@ import subprocess
 import sys
 import threading
 from collections.abc import Coroutine
+from dataclasses import dataclass
 from typing import Any
 
 import customtkinter as ctk
@@ -115,6 +120,22 @@ _RIGHT_LAYOUT: list[tuple[str, Button | None]] = [
     ("→", Button.NAV_RIGHT),
 ]
 
+_LAYOUTS: dict[Puck, tuple[str, list[tuple[str, Button | None]]]] = {
+    Puck.LEFT: ("Left puck", _LEFT_LAYOUT),
+    Puck.RIGHT: ("Right puck", _RIGHT_LAYOUT),
+}
+
+
+@dataclass
+class _PuckUi:
+    dot: ctk.CTkLabel
+    glyphs: dict[Button, ctk.CTkLabel]
+    hint: ctk.CTkLabel
+    identified: bool = False
+    last_dot_color: str = DOT_OFF
+    last_hint: str = ""
+
+
 log = logging.getLogger(__name__)
 
 
@@ -156,10 +177,18 @@ class App(ctk.CTk):
             ui_sink=self._on_button_event,
         )
 
-        # Tri-state per puck: identified (green) > pending BLE (yellow) > none (grey).
-        self._left_identified = False
-        self._right_identified = False
+        # Per-puck UI state (populated in _build_ui); tri-state dot logic
+        # lives in _refresh_state. _link_connected mirrors the Link server
+        # callback so _refresh_state can compose the hint without polling.
+        self._pucks: dict[Puck, _PuckUi] = {}
         self._link_connected = False
+        self._last_hint = ""
+        self._last_subtitle = ""
+        # Reusable fonts so the per-press flash doesn't allocate.
+        self._normal_font: ctk.CTkFont | None = None
+        self._bold_font: ctk.CTkFont | None = None
+        # Log handler captured here so we can detach it on close.
+        self._log_handler: logging.Handler | None = None
 
         self._build_ui()
         self._submit(self._start_services())
@@ -178,14 +207,12 @@ class App(ctk.CTk):
         self._subtitle.pack()
 
         # Two columns of puck cards.
+        self._normal_font = ctk.CTkFont()
+        self._bold_font = ctk.CTkFont(weight="bold")
         pucks_row = ctk.CTkFrame(self)
         pucks_row.pack(fill="x", padx=12, pady=(8, 8))
-        self._left_dot, self._left_glyphs, self._left_hint = self._build_puck_row(
-            pucks_row, "Left puck", _LEFT_LAYOUT, column=0,
-        )
-        self._right_dot, self._right_glyphs, self._right_hint = self._build_puck_row(
-            pucks_row, "Right puck", _RIGHT_LAYOUT, column=1,
-        )
+        for column, (puck, (name, layout)) in enumerate(_LAYOUTS.items()):
+            self._pucks[puck] = self._build_puck_row(pucks_row, name, layout, column)
         pucks_row.grid_columnconfigure(0, weight=1)
         pucks_row.grid_columnconfigure(1, weight=1)
 
@@ -292,6 +319,7 @@ class App(ctk.CTk):
         root_log = logging.getLogger()
         root_log.setLevel(logging.INFO)
         root_log.addHandler(handler)
+        self._log_handler = handler
 
         self._debug_visible = False
         self._refresh_state()
@@ -317,7 +345,7 @@ class App(ctk.CTk):
         name: str,
         layout: list[tuple[str, Button | None]],
         column: int,
-    ) -> tuple[ctk.CTkLabel, dict[Button, ctk.CTkLabel], ctk.CTkLabel]:
+    ) -> _PuckUi:
         card = ctk.CTkFrame(parent, fg_color="transparent")
         card.grid(row=0, column=column, sticky="nw", padx=8, pady=6)
 
@@ -328,64 +356,63 @@ class App(ctk.CTk):
             title, text="●", text_color=DOT_OFF, font=ctk.CTkFont(size=16), width=18,
         )
         dot.pack(side="left")
-        ctk.CTkLabel(
-            title, text=name, font=ctk.CTkFont(weight="bold"),
-        ).pack(side="left")
+        ctk.CTkLabel(title, text=name, font=self._bold_font).pack(side="left")
 
         glyphs: dict[Button, ctk.CTkLabel] = {}
-        normal_font = ctk.CTkFont()
         for text, button in layout:
-            lbl = ctk.CTkLabel(title, text=text, font=normal_font)
+            lbl = ctk.CTkLabel(title, text=text, font=self._normal_font)
             lbl.pack(side="left", padx=0)
             if button is not None:
                 glyphs[button] = lbl
 
         hint = ctk.CTkLabel(card, text="", anchor="w", text_color="gray60")
         hint.pack(fill="x", anchor="w", padx=(22, 0), pady=(0, 0))
-        return dot, glyphs, hint
+        return _PuckUi(dot=dot, glyphs=glyphs, hint=hint)
 
     def _refresh_state(self) -> None:
-        """Recompute dot colors, subtitle and the hint line from current state."""
+        """Recompute dot colors, subtitle and hint. Skips no-op .configure() calls."""
         ble_count = len(self._clicks)
         method = "Keyboard" if self._bridge.mode is OutputMode.KEYBOARD else "OpenBikeControl"
-        self._subtitle.configure(
-            text=f"Click 2  →  Whoosh Clicker  →  MyWhoosh  ({method})"
-        )
+        subtitle = f"Click 2  →  Whoosh Clicker  →  MyWhoosh  ({method})"
+        if subtitle != self._last_subtitle:
+            self._subtitle.configure(text=subtitle)
+            self._last_subtitle = subtitle
 
-        for dot, hint_lbl, identified in (
-            (self._left_dot, self._left_hint, self._left_identified),
-            (self._right_dot, self._right_hint, self._right_identified),
-        ):
-            if identified:
-                color = DOT_ON
-                hint_text = ""
+        for ui in self._pucks.values():
+            if ui.identified:
+                color, hint_text = DOT_ON, ""
             elif ble_count > 0:
-                color = DOT_PENDING
-                hint_text = "Confirm connection by pressing a button"
+                color, hint_text = DOT_PENDING, "Confirm connection by pressing a button"
             else:
-                color = DOT_OFF
-                hint_text = "Connect puck by pressing a button"
-            dot.configure(text_color=color)
-            hint_lbl.configure(text=hint_text)
+                color, hint_text = DOT_OFF, "Connect puck by pressing a button"
+            if color != ui.last_dot_color:
+                ui.dot.configure(text_color=color)
+                ui.last_dot_color = color
+            if hint_text != ui.last_hint:
+                ui.hint.configure(text=hint_text)
+                ui.last_hint = hint_text
 
-        mode = self._bridge.mode
-        if mode is OutputMode.KEYBOARD:
+        if self._bridge.mode is OutputMode.KEYBOARD:
             hint = "Keyboard mode — keep MyWhoosh focused while riding."
         elif not self._link_connected:
             hint = "Open MyWhoosh and start a ride — it will connect here."
         else:
             hint = "MyWhoosh connected. Pedal away."
-        self._hint_label.configure(text=hint)
+        if hint != self._last_hint:
+            self._hint_label.configure(text=hint)
+            self._last_hint = hint
 
     def _flash_glyph(self, puck: Puck, button: Button | None) -> None:
         if button is None:
             return
-        glyphs = self._left_glyphs if puck is Puck.LEFT else self._right_glyphs
-        lbl = glyphs.get(button)
+        ui = self._pucks.get(puck)
+        if ui is None:
+            return
+        lbl = ui.glyphs.get(button)
         if lbl is None:
             return
-        lbl.configure(font=ctk.CTkFont(weight="bold"))
-        self.after(180, lambda: lbl.configure(font=ctk.CTkFont(weight="normal")))
+        lbl.configure(font=self._bold_font)
+        self.after(180, lambda: lbl.configure(font=self._normal_font))
 
     def _set_scanning(self, scanning: bool) -> None:
         if scanning:
@@ -486,13 +513,12 @@ class App(ctk.CTk):
                 "and relaunch this app."
             )
         try:
+            key = KeyCode.from_char("k")
             kb = Controller()
-            kb.press(KeyCode.from_char("k"))
-            kb.release(KeyCode.from_char("k"))
-            if trusted is True:
-                log.info("Test keystroke 'k' sent (Accessibility is granted).")
-            else:
-                log.info("Test keystroke 'k' attempted.")
+            kb.press(key)
+            kb.release(key)
+            outcome = "sent (Accessibility is granted)" if trusted is True else "attempted"
+            log.info("Test keystroke 'k' %s.", outcome)
         except Exception:
             log.exception("Test keystroke failed")
         finally:
@@ -514,6 +540,10 @@ class App(ctk.CTk):
         self.after(0, apply)
 
     def _on_close(self) -> None:
+        if self._log_handler is not None:
+            logging.getLogger().removeHandler(self._log_handler)
+            self._log_handler = None
+
         async def shutdown() -> None:
             await self._link.stop()
             for task in self._bridge_tasks.values():
@@ -541,11 +571,9 @@ class App(ctk.CTk):
         self.after(0, self._apply_button_event, event)
 
     def _apply_button_event(self, event: ButtonEvent) -> None:
-        if event.puck is Puck.LEFT and not self._left_identified:
-            self._left_identified = True
-            self._refresh_state()
-        elif event.puck is Puck.RIGHT and not self._right_identified:
-            self._right_identified = True
+        ui = self._pucks.get(event.puck)
+        if ui is not None and not ui.identified:
+            ui.identified = True
             self._refresh_state()
         if event.is_down:
             self._flash_glyph(event.puck, event.button)

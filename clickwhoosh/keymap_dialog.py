@@ -114,19 +114,24 @@ class KeymapDialog(ctk.CTkToplevel):
                 return label
         return "Custom…"
 
+    @staticmethod
+    def _set_entry(entry: ctk.CTkEntry, text: str) -> None:
+        entry.delete(0, "end")
+        entry.insert(0, text)
+
     def _on_preset_picked(self, button: Button, choice: str) -> None:
         if choice == "Custom…":
             return
         for label, k in MYWHOOSH_PRESETS:
             if label == choice:
-                self._entries[button].delete(0, "end")
-                self._entries[button].insert(0, k)
+                self._set_entry(self._entries[button], k)
                 return
 
     def _reset_defaults(self) -> None:
         for button, key_str in DEFAULTS_BY_BUTTON.items():
-            self._entries[button].delete(0, "end")
-            self._entries[button].insert(0, key_str)
+            if button not in self._entries:
+                continue
+            self._set_entry(self._entries[button], key_str)
             self._dropdowns[button].set(self._initial_dropdown_value(key_str))
 
     def _save(self) -> None:

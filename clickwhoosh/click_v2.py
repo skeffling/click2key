@@ -78,15 +78,11 @@ class Button(enum.Enum):
 # Right puck bits will be filled in once that puck is awake and we run the
 # same mapping pass.
 BUTTON_LABELS: dict[int, tuple[Puck, Button]] = {
-    # Left puck (+ / A·B·Y·Z). Confirmed by pressing buttons by letter in
-    # order +, A, B, Y, Z which yielded bits 12, 4, 5, 6, 7.
-    12: (Puck.LEFT, Button.SHIFT_UP),  # +
-    4:  (Puck.LEFT, Button.A),         # green, right
-    5:  (Puck.LEFT, Button.B),         # magenta, bottom
-    6:  (Puck.LEFT, Button.Y),         # blue, top
-    7:  (Puck.LEFT, Button.Z),         # orange, left
-    # Right puck (− / arrows). Confirmed by pressing −, ↑, ↓, ←, → which
-    # yielded bits 8, 3, 1, 2, 0.
+    12: (Puck.LEFT, Button.SHIFT_UP),
+    4:  (Puck.LEFT, Button.A),
+    5:  (Puck.LEFT, Button.B),
+    6:  (Puck.LEFT, Button.Y),
+    7:  (Puck.LEFT, Button.Z),
     8:  (Puck.RIGHT, Button.SHIFT_DOWN),
     3:  (Puck.RIGHT, Button.NAV_UP),
     1:  (Puck.RIGHT, Button.NAV_DOWN),
@@ -228,12 +224,12 @@ class ClickV2:
         if last is None or last == bitmap:
             return
         # Active-low: a 1→0 transition means "pressed"; 0→1 means "released".
+        # Iterate only the bits that actually changed.
         changed = last ^ bitmap
-        for bit in range(64):
-            mask = 1 << bit
-            if not (changed & mask):
-                continue
-            now_pressed = not (bitmap & mask)
+        while changed:
+            bit = (changed & -changed).bit_length() - 1
+            changed &= changed - 1
+            now_pressed = not (bitmap & (1 << bit))
             log.info(
                 "Button bit %d %s   (bitmap 0x%X → 0x%X)",
                 bit,
@@ -241,8 +237,7 @@ class ClickV2:
                 last,
                 bitmap,
             )
-            event = self._bit_to_event(bit, now_pressed)
-            self.events.put_nowait(event)
+            self.events.put_nowait(self._bit_to_event(bit, now_pressed))
 
     def _bit_to_event(self, bit: int, is_down: bool) -> ButtonEvent:
         info = BUTTON_LABELS.get(bit)
