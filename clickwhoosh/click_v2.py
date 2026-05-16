@@ -105,14 +105,16 @@ class ButtonEvent:
         return f"bit{self.bit}"
 
 
+KEEPALIVE = bytes([0xFF, 0x04, 0x00])
+KEEPALIVE_INTERVAL_SECONDS = 25
+
+
 class ClickV2:
     def __init__(self) -> None:
         self.events: asyncio.Queue[ButtonEvent] = asyncio.Queue()
         self._client: BleakClient | None = None
         self._device: BLEDevice | None = None
-        # Session state populated by the handshake (ECDH keys, AES context, counters).
-        # Fill these in when porting from zwiftplay.
-        self._session: dict = {}
+        self._keepalive_task: asyncio.Task | None = None
 
     @staticmethod
     async def scan(timeout: float = 8.0) -> list[BLEDevice]:
@@ -136,7 +138,26 @@ class ClickV2:
         log.info("Subscribed to async + sync RX")
 
         await self._handshake()
-        log.info("Click V2 ready (greeting sent, awaiting reply)")
+        # Defeats the V2's 60s "stop emitting notifications" sleep. The
+        # specific byte sequence is from BikeControl's setupHandshake() for
+        # the V2; resending it on a 25s cadence keeps the puck alive.
+        self._keepalive_task = asyncio.create_task(self._keepalive_loop())
+        log.info("Click V2 ready (greeting sent, keepalive running)")
+
+    async def _keepalive_loop(self) -> None:
+        assert self._client is not None
+        try:
+            while self._client.is_connected:
+                try:
+                    await self._client.write_gatt_char(
+                        ZWIFT_SYNC_TX_CHAR_UUID, KEEPALIVE, response=False,
+                    )
+                except Exception:
+                    log.exception("Keepalive write failed")
+                    return
+                await asyncio.sleep(KEEPALIVE_INTERVAL_SECONDS)
+        except asyncio.CancelledError:
+            pass
 
     async def _dump_gatt(self) -> None:
         assert self._client is not None
@@ -148,6 +169,9 @@ class ClickV2:
                 log.info("  Char %s  [%s]", char.uuid, props)
 
     async def disconnect(self) -> None:
+        if self._keepalive_task is not None:
+            self._keepalive_task.cancel()
+            self._keepalive_task = None
         if self._client is not None and self._client.is_connected:
             await self._client.disconnect()
         self._client = None
