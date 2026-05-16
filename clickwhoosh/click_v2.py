@@ -37,6 +37,21 @@ ZWIFT_SYNC_RX_CHAR_UUID = "00000004-19ca-4651-86e5-fa29dcdd09d1"
 RIDE_ON = bytes([0x52, 0x69, 0x64, 0x65, 0x4F, 0x6E])  # b"RideOn"
 
 
+def _read_varint(buf: bytes, start: int) -> tuple[int, int]:
+    """Read a protobuf varint from `buf` at `start`. Returns (value, next_index)."""
+    result = 0
+    shift = 0
+    i = start
+    while i < len(buf):
+        b = buf[i]
+        result |= (b & 0x7F) << shift
+        i += 1
+        if not (b & 0x80):
+            return result, i
+        shift += 7
+    raise ValueError("Truncated varint")
+
+
 class Button(enum.Enum):
     SHIFT_UP = "shift_up"
     SHIFT_DOWN = "shift_down"
@@ -138,24 +153,56 @@ class ClickV2:
     # Notification handlers
     # ------------------------------------------------------------------
 
+    _last_bitmap: int | None = None
+
     def _on_async_notify(self, _char, data: bytearray) -> None:
-        # After the handshake completes, button events arrive here as
-        # AES-encrypted protobuf. For now, log raw bytes so we can capture
-        # them for protocol work.
-        log.info("ASYNC RX (%d bytes): %s", len(data), bytes(data).hex())
-        event = self._decode_button_event(bytes(data))
-        if event is not None:
-            self.events.put_nowait(event)
+        payload = bytes(data)
+        # Click V2 plaintext frame: 0x23 0x08 <varint bitmap>
+        # 0x23 = message type (button-state poll). 0x08 = protobuf field 1 (varint).
+        # Bitmap is active-low: bit cleared == that button is currently pressed.
+        if len(payload) >= 3 and payload[0] == 0x23 and payload[1] == 0x08:
+            bitmap, _ = _read_varint(payload, 2)
+            self._handle_bitmap(bitmap)
+            return
+        log.info("ASYNC RX (%d bytes, unhandled): %s", len(payload), payload.hex())
+
+    def _handle_bitmap(self, bitmap: int) -> None:
+        last = self._last_bitmap
+        self._last_bitmap = bitmap
+        if last is None or last == bitmap:
+            return
+        # Active-low: a 1→0 transition means "pressed"; 0→1 means "released".
+        changed = last ^ bitmap
+        for bit in range(64):
+            mask = 1 << bit
+            if not (changed & mask):
+                continue
+            now_pressed = not (bitmap & mask)
+            log.info(
+                "Button bit %d %s   (bitmap 0x%X → 0x%X)",
+                bit,
+                "PRESSED" if now_pressed else "released",
+                last,
+                bitmap,
+            )
+            event = self._bit_to_event(bit, now_pressed)
+            if event is not None:
+                self.events.put_nowait(event)
+
+    def _bit_to_event(self, bit: int, is_down: bool) -> ButtonEvent | None:
+        # Filled in once we know which bit is which physical button.
+        # Press shift-up and shift-down with the app running and watch the
+        # log for "Button bit N PRESSED" lines, then add mappings here.
+        mapping = {
+            # bit 0: Button.SHIFT_UP,
+            # bit 1: Button.SHIFT_DOWN,
+        }
+        button = mapping.get(bit)
+        if button is None:
+            return None
+        return ButtonEvent(button=button, is_down=is_down)
 
     def _on_sync_notify(self, _char, data: bytearray) -> None:
         log.info("SYNC RX (%d bytes): %s", len(data), bytes(data).hex())
         # Handshake response handling goes here.
 
-    def _decode_button_event(self, payload: bytes) -> ButtonEvent | None:
-        """Decode a decrypted protobuf button-state message.
-
-        Stub. Once the handshake is done and `payload` is plaintext, parse
-        the protobuf and emit shift_up / shift_down events. Until then,
-        returns None.
-        """
-        return None
