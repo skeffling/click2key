@@ -15,8 +15,9 @@ from typing import Any
 
 import customtkinter as ctk
 
-from .bridge import EventDeduper, run_bridge
+from .bridge import Bridge, OutputMode, run_bridge
 from .click_v2 import Button, ButtonEvent, ClickV2, Puck
+from .keyboard_out import KeyboardOutput
 from .whoosh_link import LINK_PORT, WhooshLinkServer
 
 DOT_OFF = "#888888"
@@ -84,8 +85,12 @@ class App(ctk.CTk):
         # One ClickV2 per BLE-connected puck. Keyed by device address.
         self._clicks: dict[str, ClickV2] = {}
         self._bridge_tasks: dict[str, asyncio.Task] = {}
-        self._deduper = EventDeduper()
         self._link = WhooshLinkServer(on_connection_change=self._on_link_state)
+        self._bridge = Bridge(
+            link=self._link,
+            keyboard=KeyboardOutput(),
+            ui_sink=self._on_button_event,
+        )
 
         # Tri-state per puck: identified (green) > pending BLE (yellow) > none (grey).
         self._left_identified = False
@@ -105,8 +110,8 @@ class App(ctk.CTk):
 
         header = ctk.CTkLabel(self, text="Whoosh Clicker", font=ctk.CTkFont(size=20, weight="bold"))
         header.pack(pady=(12, 4))
-        sub = ctk.CTkLabel(self, text=f"Zwift Click V2 → MyWhoosh (port {LINK_PORT})")
-        sub.pack()
+        self._subtitle = ctk.CTkLabel(self, text="")
+        self._subtitle.pack()
 
         # Two columns of puck cards.
         pucks_row = ctk.CTkFrame(self)
@@ -136,6 +141,21 @@ class App(ctk.CTk):
         self._scan_spinner = ctk.CTkProgressBar(
             status_frame, mode="indeterminate", width=110,
         )
+
+        mode_row = ctk.CTkFrame(self, fg_color="transparent")
+        mode_row.pack(fill="x", padx=12, pady=(0, 2))
+        ctk.CTkLabel(mode_row, text="Output:").pack(side="left", padx=(8, 8))
+        self._mode_var = ctk.StringVar(value=OutputMode.LINK.value)
+        ctk.CTkRadioButton(
+            mode_row, text="Link (MyWhoosh TCP)",
+            value=OutputMode.LINK.value, variable=self._mode_var,
+            command=self._on_mode_change,
+        ).pack(side="left", padx=4)
+        ctk.CTkRadioButton(
+            mode_row, text="Keyboard (focused window)",
+            value=OutputMode.KEYBOARD.value, variable=self._mode_var,
+            command=self._on_mode_change,
+        ).pack(side="left", padx=4)
 
         self._hint_label = ctk.CTkLabel(
             self, text="", anchor="w", text_color="gray60",
@@ -208,8 +228,12 @@ class App(ctk.CTk):
         return dot, glyphs
 
     def _refresh_state(self) -> None:
-        """Recompute dot colors and the hint line from current state."""
+        """Recompute dot colors, subtitle and the hint line from current state."""
         ble_count = len(self._clicks)
+        method = "Keyboard" if self._bridge.mode is OutputMode.KEYBOARD else "OpenBikeControl"
+        self._subtitle.configure(
+            text=f"Click 2  →  Whoosh Clicker  →  MyWhoosh  ({method})"
+        )
 
         for dot, identified in (
             (self._left_dot, self._left_identified),
@@ -223,12 +247,19 @@ class App(ctk.CTk):
                 color = DOT_OFF
             dot.configure(text_color=color)
 
-        if not self._link_connected:
-            hint = "Open MyWhoosh and start a ride — it will connect here."
-        elif not (self._left_identified and self._right_identified):
-            hint = "Press a button on each puck to confirm pairing."
-        else:
-            hint = "Ready. Pedal away."
+        mode = self._bridge.mode
+        if mode is OutputMode.KEYBOARD:
+            if not (self._left_identified or self._right_identified):
+                hint = "Press a button on a puck to confirm pairing. Keep MyWhoosh focused."
+            else:
+                hint = "Keyboard mode — keep MyWhoosh focused while riding."
+        else:  # LINK
+            if not self._link_connected:
+                hint = "Open MyWhoosh and start a ride — it will connect here."
+            elif not (self._left_identified and self._right_identified):
+                hint = "Press a button on each puck to confirm pairing."
+            else:
+                hint = "Ready. Pedal away."
         self._hint_label.configure(text=hint)
 
     def _flash_glyph(self, puck: Puck, button: Button | None) -> None:
@@ -268,6 +299,12 @@ class App(ctk.CTk):
 
     def _on_scan_click(self) -> None:
         self._submit(self._scan_and_connect())
+
+    def _on_mode_change(self) -> None:
+        new = OutputMode(self._mode_var.get())
+        self._bridge.mode = new
+        log.info("Output mode → %s", new.value)
+        self._refresh_state()
 
     def _on_link_state(self, connected: bool) -> None:
         def apply() -> None:
@@ -340,11 +377,7 @@ class App(ctk.CTk):
                 return
             self._clicks[dev.address] = click
             self._bridge_tasks[dev.address] = asyncio.create_task(
-                run_bridge(
-                    click, self._link,
-                    ui_sink=self._on_button_event,
-                    deduper=self._deduper,
-                )
+                run_bridge(click, self._bridge)
             )
             self.after(0, self._refresh_state)
 
