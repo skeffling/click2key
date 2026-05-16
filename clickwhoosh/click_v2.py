@@ -32,9 +32,8 @@ ZWIFT_CUSTOM_SERVICE_UUID = "0000fc82-0000-1000-8000-00805f9b34fb"
 ZWIFT_ASYNC_CHAR_UUID = "00000002-19ca-4651-86e5-fa29dcdd09d1"
 ZWIFT_SYNC_TX_CHAR_UUID = "00000003-19ca-4651-86e5-fa29dcdd09d1"
 ZWIFT_SYNC_RX_CHAR_UUID = "00000004-19ca-4651-86e5-fa29dcdd09d1"
-# V2-only extra characteristics (don't exist on V1). Best guess for the
-# control / keepalive channel.
-ZWIFT_V2_CTRL_CHAR_UUID = "00000101-19ca-4651-86e5-fa29dcdd09d1"
+# Standard Battery Service characteristic — readable, harmless to poll.
+BATTERY_LEVEL_CHAR_UUID = "00002a19-0000-1000-8000-00805f9b34fb"
 
 # Bytes the device sends/expects during the unencrypted "hello" phase.
 RIDE_ON = bytes([0x52, 0x69, 0x64, 0x65, 0x4F, 0x6E])  # b"RideOn"
@@ -108,8 +107,7 @@ class ButtonEvent:
         return f"bit{self.bit}"
 
 
-KEEPALIVE = bytes([0xFF, 0x04, 0x00])
-KEEPALIVE_INTERVAL_SECONDS = 25
+KEEPALIVE_INTERVAL_SECONDS = 30
 
 
 class ClickV2:
@@ -141,26 +139,24 @@ class ClickV2:
         log.info("Subscribed to async + sync RX")
 
         await self._handshake()
-        # Keepalive experiment: write [0xFF 0x04 0x00] to char 0x101 (a V2-only
-        # extra characteristic) every 25s. SYNC_TX was the wrong channel last
-        # time (silenced the puck immediately); 0x101 is the next best guess
-        # for the control/keepalive channel.
+        # Read-only keepalive: poll battery level every 30s. No GATT writes,
+        # which previously silenced or hung the puck. We don't surface the
+        # value — just doing the read may be enough to keep the BLE peer's
+        # idle timer fed.
         self._keepalive_task = asyncio.create_task(self._keepalive_loop())
-        log.info("Click V2 ready (greeting sent, keepalive on 0x101)")
+        log.info("Click V2 ready (greeting sent, read-only keepalive)")
 
     async def _keepalive_loop(self) -> None:
         assert self._client is not None
         try:
             while self._client.is_connected:
-                try:
-                    await self._client.write_gatt_char(
-                        ZWIFT_V2_CTRL_CHAR_UUID, KEEPALIVE, response=False,
-                    )
-                    log.debug("keepalive tx to 0x101")
-                except Exception:
-                    log.exception("Keepalive write failed; stopping loop")
-                    return
                 await asyncio.sleep(KEEPALIVE_INTERVAL_SECONDS)
+                try:
+                    await self._client.read_gatt_char(BATTERY_LEVEL_CHAR_UUID)
+                    log.debug("keepalive: battery read")
+                except Exception:
+                    log.exception("Keepalive read failed; stopping loop")
+                    return
         except asyncio.CancelledError:
             pass
 
