@@ -8,6 +8,7 @@ dependencies = [
     "customtkinter>=5.2",
     "zeroconf>=0.131",
     "pynput>=1.7",
+    "Pillow>=10.0",
 ]
 
 [project.optional-dependencies]

@@ -13,14 +13,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import subprocess
 import sys
 import threading
 from collections.abc import Coroutine
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import customtkinter as ctk
+from PIL import Image
 
 from .bridge import Bridge, OutputMode, run_bridge
 from .click_v2 import Button, ButtonEvent, ClickV2, Puck
@@ -31,6 +34,23 @@ from .whoosh_link import LINK_PORT, WhooshLinkServer
 DOT_OFF = "#888888"
 DOT_PENDING = "#d8a200"  # connected but puck identity unknown until first press
 DOT_ON = "#33aa55"
+
+
+def _asset(filename: str) -> Path | None:
+    """Locate a bundled asset whether we're running from source or a .app.
+
+    PyInstaller extracts data files to `sys._MEIPASS`; from source we look
+    next to the project root.
+    """
+    candidates = []
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root is not None:
+        candidates.append(Path(bundle_root) / "assets" / filename)
+    candidates.append(Path(__file__).resolve().parent.parent / "assets" / filename)
+    for p in candidates:
+        if p.is_file():
+            return p
+    return None
 
 
 def _accessibility_trusted() -> bool | None:
@@ -201,9 +221,20 @@ class App(ctk.CTk):
         ctk.set_appearance_mode("system")
         ctk.set_default_color_theme("blue")
 
-        # Top bar: title on the left, Scan+Connect on the right.
+        # Top bar: icon + title on the left, Scan+Connect on the right.
         top_bar = ctk.CTkFrame(self, fg_color="transparent")
         top_bar.pack(fill="x", padx=12, pady=(10, 0))
+        icon_path = _asset("title_icon.png")
+        if icon_path is not None:
+            pil_icon = Image.open(icon_path)
+            # CTkImage scales correctly on HiDPI and respects appearance mode.
+            self._title_icon = ctk.CTkImage(
+                light_image=pil_icon, dark_image=pil_icon,
+                size=(28, 28),
+            )
+            ctk.CTkLabel(top_bar, text="", image=self._title_icon).pack(
+                side="left", padx=(0, 8),
+            )
         ctk.CTkLabel(
             top_bar, text="Whoosh Clicker",
             font=ctk.CTkFont(size=20, weight="bold"),

@@ -17,7 +17,9 @@ a = Analysis(
     binaries=[],
     # CustomTkinter ships JSON theme files; bleak has platform backends loaded
     # dynamically. Both need their data files explicitly collected.
-    datas=collect_data_files('customtkinter') + collect_data_files('bleak'),
+    datas=collect_data_files('customtkinter')
+        + collect_data_files('bleak')
+        + [('assets/title_icon.png', 'assets')],
     hiddenimports=['pynput.keyboard._darwin', 'pynput.mouse._darwin',
                    'pynput.keyboard._win32', 'pynput.mouse._win32'],
     hookspath=[],
@@ -58,7 +60,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='Whoosh Clicker.app',
-    icon=None,
+    icon='assets/icon.icns',
     bundle_identifier='app.clickwhoosh.whooshclicker',
     info_plist={
         'CFBundleName': 'Whoosh Clicker',
