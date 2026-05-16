@@ -80,6 +80,18 @@ class App(ctk.CTk):
         scan_btn = ctk.CTkButton(row, text="Scan + Connect Click", command=self._on_scan_click)
         scan_btn.pack(side="right", padx=8)
 
+        debug_row = ctk.CTkFrame(self)
+        debug_row.pack(fill="x", padx=12, pady=(0, 8))
+        ctk.CTkLabel(debug_row, text="Debug:").pack(side="left", padx=(8, 4))
+        ctk.CTkButton(
+            debug_row, text="Shift Down", width=110,
+            command=lambda: self._submit(self._link.shift_down()),
+        ).pack(side="left", padx=4)
+        ctk.CTkButton(
+            debug_row, text="Shift Up", width=110,
+            command=lambda: self._submit(self._link.shift_up()),
+        ).pack(side="left", padx=4)
+
         log_box = ctk.CTkTextbox(self, state="disabled")
         log_box.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
