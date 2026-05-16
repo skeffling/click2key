@@ -16,7 +16,7 @@ from typing import Any
 import customtkinter as ctk
 
 from .bridge import run_bridge
-from .click_v2 import ClickV2
+from .click_v2 import ButtonEvent, ClickV2, Puck
 from .whoosh_link import LINK_PORT, WhooshLinkServer
 
 log = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ class App(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
         self.title("clickwhoosh")
-        self.geometry("560x420")
+        self.geometry("620x520")
 
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
@@ -79,6 +79,34 @@ class App(ctk.CTk):
 
         scan_btn = ctk.CTkButton(row, text="Scan + Connect Click", command=self._on_scan_click)
         scan_btn.pack(side="right", padx=8)
+
+        pucks_row = ctk.CTkFrame(self)
+        pucks_row.pack(fill="x", padx=12, pady=(0, 8))
+
+        self._left_title = ctk.CTkLabel(
+            pucks_row, text="Left puck  (+ / arrows)",
+            font=ctk.CTkFont(weight="bold"),
+        )
+        self._left_title.grid(row=0, column=0, sticky="w", padx=8, pady=(6, 0))
+        self._left_status = ctk.CTkLabel(pucks_row, text="not seen yet", anchor="w")
+        self._left_status.grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
+        self._left_last = ctk.CTkLabel(pucks_row, text="last button: —", anchor="w")
+        self._left_last.grid(row=2, column=0, sticky="w", padx=8, pady=(0, 6))
+
+        self._right_title = ctk.CTkLabel(
+            pucks_row, text="Right puck  (− / A·Y·Z·B)",
+            font=ctk.CTkFont(weight="bold"),
+        )
+        self._right_title.grid(row=0, column=1, sticky="w", padx=8, pady=(6, 0))
+        self._right_status = ctk.CTkLabel(pucks_row, text="not seen yet", anchor="w")
+        self._right_status.grid(row=1, column=1, sticky="w", padx=8, pady=(0, 6))
+        self._right_last = ctk.CTkLabel(pucks_row, text="last button: —", anchor="w")
+        self._right_last.grid(row=2, column=1, sticky="w", padx=8, pady=(0, 6))
+
+        pucks_row.grid_columnconfigure(0, weight=1)
+        pucks_row.grid_columnconfigure(1, weight=1)
+
+        self._seen_pucks: set[Puck] = set()
 
         debug_row = ctk.CTkFrame(self)
         debug_row.pack(fill="x", padx=12, pady=(0, 8))
@@ -134,7 +162,30 @@ class App(ctk.CTk):
 
     async def _start_services(self) -> None:
         await self._link.start()
-        self._bridge_task = asyncio.create_task(run_bridge(self._click, self._link))
+        self._bridge_task = asyncio.create_task(
+            run_bridge(self._click, self._link, ui_sink=self._on_button_event)
+        )
+
+    def _on_button_event(self, event: ButtonEvent) -> None:
+        # Runs on the asyncio thread. Marshal UI updates onto Tk's main loop.
+        self.after(0, self._apply_button_event, event)
+
+    def _apply_button_event(self, event: ButtonEvent) -> None:
+        puck = event.puck
+        self._seen_pucks.add(puck)
+        verb = "pressed" if event.is_down else "released"
+        line = f"last button: {event.label} ({verb})"
+        if puck is Puck.LEFT:
+            self._left_status.configure(text="connected")
+            self._left_last.configure(text=line)
+        elif puck is Puck.RIGHT:
+            self._right_status.configure(text="connected")
+            self._right_last.configure(text=line)
+        else:
+            # Unknown puck — show on both rows so the user can identify it
+            # during the mapping pass.
+            target = self._left_last if "bit" in event.label else self._right_last
+            target.configure(text=f"{event.label} ({verb}) — unmapped")
 
     async def _scan_and_connect(self) -> None:
         log.info("Scanning for Click V2…")

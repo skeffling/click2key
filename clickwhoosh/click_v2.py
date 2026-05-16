@@ -52,16 +52,43 @@ def _read_varint(buf: bytes, start: int) -> tuple[int, int]:
     raise ValueError("Truncated varint")
 
 
+class Puck(enum.Enum):
+    LEFT = "left"     # + and the 4 arrow buttons
+    RIGHT = "right"   # − and A / Y / Z / B
+    UNKNOWN = "unknown"
+
+
 class Button(enum.Enum):
-    SHIFT_UP = "shift_up"
-    SHIFT_DOWN = "shift_down"
-    # V2 also has nav D-pad + A/B/Y/Z; add as needed.
+    SHIFT_UP = "shift_up"      # + on left puck
+    SHIFT_DOWN = "shift_down"  # − on right puck
+    NAV_UP = "nav_up"
+    NAV_DOWN = "nav_down"
+    NAV_LEFT = "nav_left"
+    NAV_RIGHT = "nav_right"
+    A = "A"
+    B = "B"
+    Y = "Y"
+    Z = "Z"
+
+
+# Display label for each button. Filled in as we identify bits.
+BUTTON_LABELS: dict[int, tuple[Puck, Button]] = {
+    # bit 12: (Puck.LEFT, Button.NAV_UP),   # example — fill in from discovery
+}
 
 
 @dataclass(frozen=True)
 class ButtonEvent:
-    button: Button
+    bit: int
+    puck: Puck
+    button: Button | None  # None when the bit is not yet mapped
     is_down: bool
+
+    @property
+    def label(self) -> str:
+        if self.button is not None:
+            return self.button.value
+        return f"bit{self.bit}"
 
 
 class ClickV2:
@@ -186,21 +213,14 @@ class ClickV2:
                 bitmap,
             )
             event = self._bit_to_event(bit, now_pressed)
-            if event is not None:
-                self.events.put_nowait(event)
+            self.events.put_nowait(event)
 
-    def _bit_to_event(self, bit: int, is_down: bool) -> ButtonEvent | None:
-        # Filled in once we know which bit is which physical button.
-        # Press shift-up and shift-down with the app running and watch the
-        # log for "Button bit N PRESSED" lines, then add mappings here.
-        mapping = {
-            # bit 0: Button.SHIFT_UP,
-            # bit 1: Button.SHIFT_DOWN,
-        }
-        button = mapping.get(bit)
-        if button is None:
-            return None
-        return ButtonEvent(button=button, is_down=is_down)
+    def _bit_to_event(self, bit: int, is_down: bool) -> ButtonEvent:
+        info = BUTTON_LABELS.get(bit)
+        if info is None:
+            return ButtonEvent(bit=bit, puck=Puck.UNKNOWN, button=None, is_down=is_down)
+        puck, button = info
+        return ButtonEvent(bit=bit, puck=puck, button=button, is_down=is_down)
 
     def _on_sync_notify(self, _char, data: bytearray) -> None:
         log.info("SYNC RX (%d bytes): %s", len(data), bytes(data).hex())
