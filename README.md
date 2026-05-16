@@ -1,6 +1,8 @@
-# clickwhoosh
+# Whoosh Clicker
 
-A lean Windows bridge from a **Zwift Click V2** controller to **MyWhoosh**, using MyWhoosh's local "Link" TCP protocol.
+A lean bridge from a **Zwift Click V2** controller to **MyWhoosh**, using MyWhoosh's local "Link" TCP protocol. Runs on macOS and Windows.
+
+(Python package is still `clickwhoosh`.)
 
 Not affiliated with or derived from BikeControl. Built from scratch using public protocol documentation.
 

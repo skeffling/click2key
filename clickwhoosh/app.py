@@ -72,7 +72,7 @@ class TkLogHandler(logging.Handler):
 class App(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("clickwhoosh")
+        self.title("Whoosh Clicker")
         self._collapsed_geometry = "640x250"
         self._expanded_geometry = "720x560"
         self.geometry(self._collapsed_geometry)
@@ -103,7 +103,7 @@ class App(ctk.CTk):
         ctk.set_appearance_mode("system")
         ctk.set_default_color_theme("blue")
 
-        header = ctk.CTkLabel(self, text="clickwhoosh", font=ctk.CTkFont(size=20, weight="bold"))
+        header = ctk.CTkLabel(self, text="Whoosh Clicker", font=ctk.CTkFont(size=20, weight="bold"))
         header.pack(pady=(12, 4))
         sub = ctk.CTkLabel(self, text=f"Zwift Click V2 → MyWhoosh (port {LINK_PORT})")
         sub.pack()
