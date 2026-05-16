@@ -572,6 +572,14 @@ class App(ctk.CTk):
 
     def _apply_button_event(self, event: ButtonEvent) -> None:
         ui = self._pucks.get(event.puck)
+        log.info(
+            "Event: puck=%s button=%s is_down=%s; ui=%s identified=%s",
+            event.puck.value,
+            event.label,
+            event.is_down,
+            "found" if ui else "MISSING",
+            ui.identified if ui else "n/a",
+        )
         if ui is not None and not ui.identified:
             ui.identified = True
             self._refresh_state()

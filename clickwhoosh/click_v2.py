@@ -138,26 +138,11 @@ class ClickV2:
         log.info("Subscribed to async + sync RX")
 
         await self._handshake()
-        # Defeats the V2's 60s "stop emitting notifications" sleep. The
-        # specific byte sequence is from BikeControl's setupHandshake() for
-        # the V2; resending it on a 25s cadence keeps the puck alive.
-        self._keepalive_task = asyncio.create_task(self._keepalive_loop())
-        log.info("Click V2 ready (greeting sent, keepalive running)")
-
-    async def _keepalive_loop(self) -> None:
-        assert self._client is not None
-        try:
-            while self._client.is_connected:
-                try:
-                    await self._client.write_gatt_char(
-                        ZWIFT_SYNC_TX_CHAR_UUID, KEEPALIVE, response=False,
-                    )
-                except Exception:
-                    log.exception("Keepalive write failed")
-                    return
-                await asyncio.sleep(KEEPALIVE_INTERVAL_SECONDS)
-        except asyncio.CancelledError:
-            pass
+        # Keepalive disabled — the [0xFF 0x04 0x00] write to SYNC_TX seemed
+        # to make the puck stop emitting notifications altogether. Need to
+        # figure out the right channel/sequence; for now the 60s sleep is
+        # mitigated by pairing once with the official Zwift app.
+        log.info("Click V2 ready (greeting sent)")
 
     async def _dump_gatt(self) -> None:
         assert self._client is not None
