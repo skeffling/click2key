@@ -72,12 +72,24 @@ class ClickV2:
         self._device = device
         self._client = BleakClient(device)
         await self._client.connect()
+        await self._dump_gatt()
 
+        # Subscribe BEFORE writing — otherwise we miss the handshake reply.
         await self._client.start_notify(ZWIFT_ASYNC_CHAR_UUID, self._on_async_notify)
         await self._client.start_notify(ZWIFT_SYNC_RX_CHAR_UUID, self._on_sync_notify)
+        log.info("Subscribed to async + sync RX")
 
         await self._handshake()
-        log.info("Click V2 ready")
+        log.info("Click V2 ready (greeting sent, awaiting reply)")
+
+    async def _dump_gatt(self) -> None:
+        assert self._client is not None
+        log.info("Enumerating GATT services on %s", self._device.address if self._device else "?")
+        for service in self._client.services:
+            log.info("Service %s", service.uuid)
+            for char in service.characteristics:
+                props = ",".join(char.properties)
+                log.info("  Char %s  [%s]", char.uuid, props)
 
     async def disconnect(self) -> None:
         if self._client is not None and self._client.is_connected:
@@ -102,10 +114,15 @@ class ClickV2:
         confirm the BLE link is alive before tackling crypto.
         """
         assert self._client is not None
-        greeting = RIDE_ON + bytes([0x01, 0x03])  # TODO append pubkey
-        log.warning("Handshake is a stub — writing greeting only")
+        # SYNC_TX is write-without-response on Click V2 — confirmed by GATT dump.
+        # Greeting is "RideOn" + two-byte type code. zwiftplay docs show the
+        # full handshake also appends a 64-byte ECDH public key; we send the
+        # short greeting first to see what the device replies with.
+        greeting = RIDE_ON + bytes([0x01, 0x03])
+        log.warning("Handshake is a stub — sending greeting only (no pubkey yet)")
+        log.info("TX → SYNC_TX (%d bytes): %s", len(greeting), greeting.hex())
         await self._client.write_gatt_char(
-            ZWIFT_SYNC_TX_CHAR_UUID, greeting, response=True
+            ZWIFT_SYNC_TX_CHAR_UUID, greeting, response=False
         )
         # TODO post-handshake:
         #   - send [0xFF, 0x04, 0x00] to ASYNC (BikeControl does this for V2;
@@ -125,13 +142,13 @@ class ClickV2:
         # After the handshake completes, button events arrive here as
         # AES-encrypted protobuf. For now, log raw bytes so we can capture
         # them for protocol work.
-        log.debug("ASYNC notify (%d bytes): %s", len(data), data.hex())
+        log.info("ASYNC RX (%d bytes): %s", len(data), bytes(data).hex())
         event = self._decode_button_event(bytes(data))
         if event is not None:
             self.events.put_nowait(event)
 
     def _on_sync_notify(self, _char, data: bytearray) -> None:
-        log.debug("SYNC RX notify (%d bytes): %s", len(data), data.hex())
+        log.info("SYNC RX (%d bytes): %s", len(data), bytes(data).hex())
         # Handshake response handling goes here.
 
     def _decode_button_event(self, payload: bytes) -> ButtonEvent | None:
