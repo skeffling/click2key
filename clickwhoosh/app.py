@@ -27,6 +27,34 @@ DOT_OFF = "#888888"
 DOT_PENDING = "#d8a200"  # connected but puck identity unknown until first press
 DOT_ON = "#33aa55"
 
+
+def _accessibility_target() -> str:
+    """Best macOS Accessibility target for the running Python.
+
+    Prefers the framework's Python.app bundle (Apple's preferred shape for
+    Accessibility entries); falls back to the resolved python3.x binary.
+    """
+    import os
+    real = os.path.realpath(sys.executable)
+    # Walk up looking for a Python.framework/Versions/X.Y dir, then point at
+    # its Resources/Python.app bundle if present.
+    head = real
+    for _ in range(8):
+        head = os.path.dirname(head)
+        if os.path.basename(head) == "Python.framework":
+            break
+    else:
+        return real
+    # head is .../Python.framework — find the active Versions/X.Y/Resources/Python.app
+    versions_dir = os.path.join(head, "Versions")
+    if not os.path.isdir(versions_dir):
+        return real
+    for v in sorted(os.listdir(versions_dir), reverse=True):
+        candidate = os.path.join(versions_dir, v, "Resources", "Python.app")
+        if os.path.isdir(candidate):
+            return candidate
+    return real
+
 # (display text, optional Button mapping) per glyph in the title.
 _LEFT_LAYOUT: list[tuple[str, Button | None]] = [
     ("  ", None),
@@ -225,12 +253,11 @@ class App(ctk.CTk):
         self._debug_visible = False
         self._refresh_state()
 
-        # Now that the Tk log handler is in place, log the Python path so the
-        # user can find it in the debug pane (not just terminal stderr).
-        import os
+        # Now that the Tk log handler is in place, log the path so the user
+        # can find it in the debug pane (not just terminal stderr).
         log.info(
-            "Python binary (use for macOS Accessibility permission):\n    %s",
-            os.path.realpath(sys.executable),
+            "macOS Accessibility target (add this in System Settings):\n    %s",
+            _accessibility_target(),
         )
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -340,20 +367,20 @@ class App(ctk.CTk):
         self._submit(self._scan_and_connect())
 
     def _open_accessibility_settings(self) -> None:
-        # Help the user pick the right binary: print the path of the Python
-        # interpreter that's actually running this process, since that's what
-        # macOS needs the permission for when running from a terminal.
-        import os
-        py = os.path.realpath(sys.executable)
+        target = _accessibility_target()
         log.info(
-            "Accessibility target binary (drag this into the list in "
-            "System Settings → Privacy → Accessibility):\n    %s",
-            py,
+            "Drag this into Accessibility (or open the parent folder and select it):\n    %s",
+            target,
         )
         self._open_system_settings(
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
             "Accessibility",
         )
+        # Pop a Finder window at the target so the user can drag it in.
+        try:
+            subprocess.Popen(["open", "-R", target])
+        except Exception:
+            log.exception("Could not reveal %s in Finder", target)
 
     def _open_bluetooth_settings(self) -> None:
         self._open_system_settings(
