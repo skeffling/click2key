@@ -20,6 +20,7 @@ import customtkinter as ctk
 from .bridge import Bridge, OutputMode, run_bridge
 from .click_v2 import Button, ButtonEvent, ClickV2, Puck
 from .keyboard_out import KeyboardOutput
+from .keymap_dialog import KeymapDialog
 from .whoosh_link import LINK_PORT, WhooshLinkServer
 
 DOT_OFF = "#888888"
@@ -118,10 +119,10 @@ class App(ctk.CTk):
         # Two columns of puck cards.
         pucks_row = ctk.CTkFrame(self)
         pucks_row.pack(fill="x", padx=12, pady=(8, 8))
-        self._left_dot, self._left_glyphs = self._build_puck_row(
+        self._left_dot, self._left_glyphs, self._left_hint = self._build_puck_row(
             pucks_row, "Left puck", _LEFT_LAYOUT, column=0,
         )
-        self._right_dot, self._right_glyphs = self._build_puck_row(
+        self._right_dot, self._right_glyphs, self._right_hint = self._build_puck_row(
             pucks_row, "Right puck", _RIGHT_LAYOUT, column=1,
         )
         pucks_row.grid_columnconfigure(0, weight=1)
@@ -206,6 +207,10 @@ class App(ctk.CTk):
             perm_row, text="Test keystroke (k)", width=150,
             command=self._test_keystroke,
         ).pack(side="left", padx=4)
+        ctk.CTkButton(
+            perm_row, text="Configure keys…", width=140,
+            command=self._open_keymap_dialog,
+        ).pack(side="left", padx=4)
 
         log_box = ctk.CTkTextbox(self._debug_pane, state="disabled")
         log_box.pack(fill="both", expand=True, padx=8, pady=(4, 8))
@@ -227,26 +232,32 @@ class App(ctk.CTk):
         name: str,
         layout: list[tuple[str, Button | None]],
         column: int,
-    ) -> tuple[ctk.CTkLabel, dict[Button, ctk.CTkLabel]]:
+    ) -> tuple[ctk.CTkLabel, dict[Button, ctk.CTkLabel], ctk.CTkLabel]:
         card = ctk.CTkFrame(parent, fg_color="transparent")
-        card.grid(row=0, column=column, sticky="ew", padx=8, pady=6)
+        card.grid(row=0, column=column, sticky="nw", padx=8, pady=6)
+
+        title = ctk.CTkFrame(card, fg_color="transparent")
+        title.pack(fill="x", anchor="w")
 
         dot = ctk.CTkLabel(
-            card, text="●", text_color=DOT_OFF, font=ctk.CTkFont(size=16), width=18,
+            title, text="●", text_color=DOT_OFF, font=ctk.CTkFont(size=16), width=18,
         )
         dot.pack(side="left")
         ctk.CTkLabel(
-            card, text=name, font=ctk.CTkFont(weight="bold"),
+            title, text=name, font=ctk.CTkFont(weight="bold"),
         ).pack(side="left")
 
         glyphs: dict[Button, ctk.CTkLabel] = {}
         normal_font = ctk.CTkFont()
         for text, button in layout:
-            lbl = ctk.CTkLabel(card, text=text, font=normal_font)
+            lbl = ctk.CTkLabel(title, text=text, font=normal_font)
             lbl.pack(side="left", padx=0)
             if button is not None:
                 glyphs[button] = lbl
-        return dot, glyphs
+
+        hint = ctk.CTkLabel(card, text="", anchor="w", text_color="gray60")
+        hint.pack(fill="x", anchor="w", padx=(22, 0), pady=(0, 0))
+        return dot, glyphs, hint
 
     def _refresh_state(self) -> None:
         """Recompute dot colors, subtitle and the hint line from current state."""
@@ -256,31 +267,29 @@ class App(ctk.CTk):
             text=f"Click 2  →  Whoosh Clicker  →  MyWhoosh  ({method})"
         )
 
-        for dot, identified in (
-            (self._left_dot, self._left_identified),
-            (self._right_dot, self._right_identified),
+        for dot, hint_lbl, identified in (
+            (self._left_dot, self._left_hint, self._left_identified),
+            (self._right_dot, self._right_hint, self._right_identified),
         ):
             if identified:
                 color = DOT_ON
+                hint_text = ""
             elif ble_count > 0:
                 color = DOT_PENDING
+                hint_text = "Confirm connection by pressing a button"
             else:
                 color = DOT_OFF
+                hint_text = "Connect puck by pressing a button"
             dot.configure(text_color=color)
+            hint_lbl.configure(text=hint_text)
 
         mode = self._bridge.mode
         if mode is OutputMode.KEYBOARD:
-            if not (self._left_identified or self._right_identified):
-                hint = "Press a button on a puck to confirm pairing. Keep MyWhoosh focused."
-            else:
-                hint = "Keyboard mode — keep MyWhoosh focused while riding."
-        else:  # LINK
-            if not self._link_connected:
-                hint = "Open MyWhoosh and start a ride — it will connect here."
-            elif not (self._left_identified and self._right_identified):
-                hint = "Press a button on each puck to confirm pairing."
-            else:
-                hint = "Ready. Pedal away."
+            hint = "Keyboard mode — keep MyWhoosh focused while riding."
+        elif not self._link_connected:
+            hint = "Open MyWhoosh and start a ride — it will connect here."
+        else:
+            hint = "MyWhoosh connected. Pedal away."
         self._hint_label.configure(text=hint)
 
     def _flash_glyph(self, puck: Puck, button: Button | None) -> None:
@@ -342,6 +351,14 @@ class App(ctk.CTk):
             subprocess.Popen(["open", url])
         except Exception:
             log.exception("Failed to open System Settings")
+
+    def _open_keymap_dialog(self) -> None:
+        keyboard = self._bridge.keyboard
+        KeymapDialog(
+            self,
+            current=keyboard.get_mapping(),
+            on_apply=keyboard.set_mapping,
+        )
 
     def _test_keystroke(self) -> None:
         log.info("Sending test keystroke 'k' in 2 seconds — focus your target window now")

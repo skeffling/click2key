@@ -15,27 +15,21 @@ import logging
 from pynput.keyboard import Controller, Key, KeyCode
 
 from .click_v2 import Button, ButtonEvent
+from .keymap import load_keymap
 
 log = logging.getLogger(__name__)
-
-
-# Defaults derived from BikeControl's MyWhoosh mapping
-# (lib/utils/keymap/apps/my_whoosh.dart): K = shift up, I = shift down.
-# Arrows on the pucks map to the matching keyboard arrows.
-DEFAULT_MAPPING: dict[Button, Key | KeyCode] = {
-    Button.SHIFT_UP:    KeyCode.from_char("k"),
-    Button.SHIFT_DOWN:  KeyCode.from_char("i"),
-    Button.NAV_UP:      Key.up,
-    Button.NAV_DOWN:    Key.down,
-    Button.NAV_LEFT:    Key.left,
-    Button.NAV_RIGHT:   Key.right,
-}
 
 
 class KeyboardOutput:
     def __init__(self, mapping: dict[Button, Key | KeyCode] | None = None) -> None:
         self._kb = Controller()
-        self._mapping = mapping if mapping is not None else dict(DEFAULT_MAPPING)
+        self._mapping = mapping if mapping is not None else load_keymap()
+
+    def set_mapping(self, mapping: dict[Button, Key | KeyCode]) -> None:
+        self._mapping = dict(mapping)
+
+    def get_mapping(self) -> dict[Button, Key | KeyCode]:
+        return dict(self._mapping)
 
     def send(self, event: ButtonEvent) -> None:
         if event.button is None:
