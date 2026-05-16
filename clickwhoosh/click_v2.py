@@ -217,7 +217,10 @@ class ClickV2:
                 log.info("Battery: %d%%", pct)
                 self._last_battery = pct
             return
-        log.info("ASYNC RX (%d bytes, unhandled): %s", len(payload), payload.hex())
+        # Other frames (device info, capabilities, periodic heartbeats) — not
+        # actionable for shifting. Keep at DEBUG so they're available when
+        # investigating but don't drown the user-facing log.
+        log.debug("ASYNC RX (%d bytes, unhandled): %s", len(payload), payload.hex())
 
     def _handle_bitmap(self, bitmap: int) -> None:
         last = self._last_bitmap
@@ -249,6 +252,7 @@ class ClickV2:
         return ButtonEvent(bit=bit, puck=puck, button=button, is_down=is_down)
 
     def _on_sync_notify(self, _char, data: bytearray) -> None:
-        log.info("SYNC RX (%d bytes): %s", len(data), bytes(data).hex())
-        # Handshake response handling goes here.
+        # The "RideOn 02 03" reply lands here once at connect; afterwards SYNC
+        # is silent. Keep at DEBUG so it doesn't clutter the user log.
+        log.debug("SYNC RX (%d bytes): %s", len(data), bytes(data).hex())
 
