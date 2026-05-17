@@ -278,13 +278,22 @@ class App(ctk.CTk):
             text_color=DOT_OFF, width=14,
         )
         self._bt_dot.pack(side="left")
-        ctk.CTkLabel(self._perm_row, text="Bluetooth").pack(side="left", padx=(2, 12))
+        ctk.CTkLabel(self._perm_row, text="Bluetooth").pack(side="left", padx=(2, 4))
+        self._bt_fix_btn = ctk.CTkButton(
+            self._perm_row, text="Open Settings", width=110, height=22,
+            command=self._open_bluetooth_settings,
+        )
+        # Visibility controlled by _refresh_state.
         self._ax_dot = ctk.CTkLabel(
             self._perm_row, text="●", font=ctk.CTkFont(size=14),
             text_color=DOT_OFF, width=14,
         )
-        self._ax_dot.pack(side="left")
-        ctk.CTkLabel(self._perm_row, text="Accessibility").pack(side="left", padx=(2, 0))
+        self._ax_dot.pack(side="left", padx=(12, 0))
+        ctk.CTkLabel(self._perm_row, text="Accessibility").pack(side="left", padx=(2, 4))
+        self._ax_fix_btn = ctk.CTkButton(
+            self._perm_row, text="Open Settings", width=110, height=22,
+            command=self._open_accessibility_settings,
+        )
 
         self._perm_hint = ctk.CTkLabel(
             self._setup_panel, text="", anchor="w", justify="left",
@@ -442,16 +451,20 @@ class App(ctk.CTk):
         ax = _accessibility_trusted()
         self._bt_dot.configure(text_color=DOT_ON if bt is True else DOT_OFF)
         self._ax_dot.configure(text_color=DOT_ON if ax is True else DOT_OFF)
+        if bt is True:
+            self._bt_fix_btn.pack_forget()
+        elif not self._bt_fix_btn.winfo_ismapped():
+            self._bt_fix_btn.pack(side="left", padx=(4, 0))
+        if ax is True:
+            self._ax_fix_btn.pack_forget()
+        elif not self._ax_fix_btn.winfo_ismapped():
+            self._ax_fix_btn.pack(side="left", padx=(4, 0))
         perm_msgs: list[str] = []
         if bt is False or bt is None:
-            perm_msgs.append(
-                "• Bluetooth: open System Settings → Privacy & Security → "
-                "Bluetooth and enable Click2Key."
-            )
+            perm_msgs.append("• Bluetooth not granted — click 'Open Settings' and enable Click2Key.")
         if ax is False:
             perm_msgs.append(
-                "• Accessibility: open System Settings → Privacy & Security → "
-                "Accessibility and add Click2Key (then relaunch)."
+                "• Accessibility not granted — click 'Open Settings', add Click2Key, then relaunch."
             )
         self._perm_hint.configure(text="\n".join(perm_msgs))
 
