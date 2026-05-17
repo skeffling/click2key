@@ -51,6 +51,25 @@ def _asset(filename: str) -> Path | None:
     return None
 
 
+def _bluetooth_authorized() -> bool | None:
+    """True if macOS has granted Bluetooth permission to this process.
+
+    Uses CoreBluetooth's CBManager.authorization (10.13+):
+        0=NotDetermined, 1=Restricted, 2=Denied, 3=AllowedAlways.
+    None on non-macOS or if the API isn't reachable.
+    """
+    if sys.platform != "darwin":
+        return None
+    try:
+        from CoreBluetooth import CBManager  # type: ignore[import-not-found]
+    except Exception:
+        return None
+    try:
+        return CBManager.authorization() == 3
+    except Exception:
+        return None
+
+
 def _accessibility_trusted() -> bool | None:
     """Returns True/False if running on macOS and we can query the API.
 
@@ -246,14 +265,33 @@ class App(ctk.CTk):
             text_color="gray60",
         ).pack(pady=(2, 0))
 
-        # First-run setup hint. Hidden once both pucks are identified.
+        # Setup panel — permissions row + getting-started instructions.
+        # Hidden once both permissions are granted AND both pucks identified.
         self._setup_panel = ctk.CTkFrame(self)
+        self._perm_row = ctk.CTkFrame(self._setup_panel, fg_color="transparent")
+        self._perm_row.pack(fill="x", padx=12, pady=(8, 0))
         ctk.CTkLabel(
-            self._setup_panel,
-            text="Setup",
-            font=ctk.CTkFont(weight="bold"),
-            anchor="w",
-        ).pack(fill="x", padx=12, pady=(8, 0))
+            self._perm_row, text="Permissions:", font=ctk.CTkFont(weight="bold"),
+        ).pack(side="left", padx=(0, 8))
+        self._bt_dot = ctk.CTkLabel(
+            self._perm_row, text="●", font=ctk.CTkFont(size=14),
+            text_color=DOT_OFF, width=14,
+        )
+        self._bt_dot.pack(side="left")
+        ctk.CTkLabel(self._perm_row, text="Bluetooth").pack(side="left", padx=(2, 12))
+        self._ax_dot = ctk.CTkLabel(
+            self._perm_row, text="●", font=ctk.CTkFont(size=14),
+            text_color=DOT_OFF, width=14,
+        )
+        self._ax_dot.pack(side="left")
+        ctk.CTkLabel(self._perm_row, text="Accessibility").pack(side="left", padx=(2, 0))
+
+        self._perm_hint = ctk.CTkLabel(
+            self._setup_panel, text="", anchor="w", justify="left",
+            text_color="#d8a200",
+        )
+        self._perm_hint.pack(fill="x", padx=12, pady=(2, 0))
+
         ctk.CTkLabel(
             self._setup_panel,
             text=(
@@ -265,7 +303,7 @@ class App(ctk.CTk):
             ),
             justify="left",
             anchor="w",
-        ).pack(fill="x", padx=12, pady=(0, 8))
+        ).pack(fill="x", padx=12, pady=(6, 8))
         self._setup_panel.pack(fill="x", padx=12, pady=(8, 0))
 
         # Two columns of puck cards.
@@ -283,7 +321,7 @@ class App(ctk.CTk):
         )
         self._hint_label.pack(fill="x", padx=20, pady=(0, 4))
 
-        # Toggle row — the only thing visible from the debug pane when collapsed.
+        # Top-level button row: Configure keys + debug toggle.
         toggle_row = ctk.CTkFrame(self, fg_color="transparent")
         toggle_row.pack(fill="x", padx=12, pady=(2, 8))
         self._debug_toggle = ctk.CTkButton(
@@ -291,6 +329,10 @@ class App(ctk.CTk):
             command=self._toggle_debug_pane,
         )
         self._debug_toggle.pack(side="right")
+        ctk.CTkButton(
+            toggle_row, text="Configure keys…", width=140, height=28,
+            command=self._open_keymap_dialog,
+        ).pack(side="right", padx=(0, 8))
 
         # Debug pane — created but not packed; toggle pack/pack_forget below.
         self._debug_pane = ctk.CTkFrame(self)
@@ -314,10 +356,6 @@ class App(ctk.CTk):
             command=self._test_keystroke,
         )
         self._test_kb_btn.pack(side="left", padx=4)
-        ctk.CTkButton(
-            perm_row, text="Configure keys…", width=140,
-            command=self._open_keymap_dialog,
-        ).pack(side="left", padx=4)
 
         test_row = ctk.CTkFrame(self._debug_pane, fg_color="transparent")
         test_row.pack(fill="x", padx=8, pady=(0, 4))
@@ -341,6 +379,8 @@ class App(ctk.CTk):
 
         self._debug_visible = False
         self._refresh_state()
+        # Cheap periodic poll so permission grants show up without a restart.
+        self.after(3000, self._tick_refresh)
 
         # Now that the Tk log handler is in place, log the path so the user
         # can find it in the debug pane (not just terminal stderr).
@@ -391,11 +431,31 @@ class App(ctk.CTk):
         """Recompute dot colors and hint. Skips no-op .configure() calls."""
         ble_count = len(self._clicks)
 
-        # Hide the setup panel once both pucks are identified.
+        # Permission status — recompute on every refresh so manual grants in
+        # System Settings show up after the user clicks back into the app.
+        bt = _bluetooth_authorized()
+        ax = _accessibility_trusted()
+        self._bt_dot.configure(text_color=DOT_ON if bt is True else DOT_OFF)
+        self._ax_dot.configure(text_color=DOT_ON if ax is True else DOT_OFF)
+        perm_msgs: list[str] = []
+        if bt is False or bt is None:
+            perm_msgs.append(
+                "• Bluetooth: open System Settings → Privacy & Security → "
+                "Bluetooth and enable Click2Key."
+            )
+        if ax is False:
+            perm_msgs.append(
+                "• Accessibility: open System Settings → Privacy & Security → "
+                "Accessibility and add Click2Key (then relaunch)."
+            )
+        self._perm_hint.configure(text="\n".join(perm_msgs))
+
+        # Hide the setup panel once both pucks are identified AND both perms ok.
         all_identified = all(ui.identified for ui in self._pucks.values())
-        if all_identified and self._setup_panel.winfo_ismapped():
+        perms_ok = bt is True and ax is True
+        if all_identified and perms_ok and self._setup_panel.winfo_ismapped():
             self._setup_panel.pack_forget()
-        elif not all_identified and not self._setup_panel.winfo_ismapped():
+        elif (not all_identified or not perms_ok) and not self._setup_panel.winfo_ismapped():
             self._setup_panel.pack(fill="x", padx=12, pady=(8, 0), before=self._pucks_row)
 
         for ui in self._pucks.values():
@@ -419,6 +479,10 @@ class App(ctk.CTk):
         if hint != self._last_hint:
             self._hint_label.configure(text=hint)
             self._last_hint = hint
+
+    def _tick_refresh(self) -> None:
+        self._refresh_state()
+        self.after(3000, self._tick_refresh)
 
     def _flash_glyph(self, puck: Puck, button: Button | None) -> None:
         if button is None:
