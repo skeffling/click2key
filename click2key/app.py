@@ -314,9 +314,9 @@ class App(ctk.CTk):
         ctk.CTkLabel(
             self._setup_panel,
             text=(
-                "1. Wake both Click pucks (long-press any button until the LED is solid blue).\n"
-                "2. Click Scan + Connect.\n"
-                "3. Press any button on each puck so we can identify which is which.\n\n"
+                "1. Wake both pucks (long-press any button until the LED is solid blue).\n"
+                "2. Click 'Scan + Connect' at the top.\n"
+                "3. Press a few buttons on each puck to pair them.\n\n"
                 "If a puck stops responding after ~60 seconds, pair it once in the free Zwift\n"
                 "app and ride briefly — this permanently fixes the silent-puck issue."
             ),
