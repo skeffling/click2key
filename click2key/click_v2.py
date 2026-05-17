@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import enum
 import logging
+import time
 from dataclasses import dataclass
 
 from bleak import BleakClient, BleakScanner
@@ -116,6 +117,19 @@ class ClickV2:
         self._client: BleakClient | None = None
         self._device: BLEDevice | None = None
         self._keepalive_task: asyncio.Task | None = None
+        self._connected_at: float | None = None
+
+    # ~Time after connect with no button events that we call a puck "silent"
+    # (the V2's well-known 60-second sleep). BikeControl uses 60s for the same
+    # check; we go slightly higher so a slow first-press doesn't trip it.
+    SILENT_THRESHOLD_SECONDS = 70
+
+    @property
+    def is_silent(self) -> bool:
+        """True if BLE-connected for >threshold but no button events received."""
+        if self._connected_at is None or self._last_bitmap is not None:
+            return False
+        return (time.monotonic() - self._connected_at) > self.SILENT_THRESHOLD_SECONDS
 
     @staticmethod
     async def scan(timeout: float = 8.0) -> list[BLEDevice]:
@@ -131,6 +145,7 @@ class ClickV2:
         self._device = device
         self._client = BleakClient(device)
         await self._client.connect()
+        self._connected_at = time.monotonic()
         await self._dump_gatt()
 
         # Subscribe BEFORE writing — otherwise we miss the handshake reply.

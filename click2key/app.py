@@ -466,6 +466,13 @@ class App(ctk.CTk):
             perm_msgs.append(
                 "• Accessibility not granted — click 'Open Settings', add Click2Key, then relaunch."
             )
+        silent_count = sum(1 for c in self._clicks.values() if c.is_silent)
+        if silent_count > 0:
+            perm_msgs.append(
+                f"• {silent_count} puck(s) silent — connected but no button events for "
+                "over a minute. Pair the puck once in the free Zwift app and ride briefly "
+                "to permanently fix it."
+            )
         self._perm_hint.configure(text="\n".join(perm_msgs))
 
         # Hide the setup panel once both pucks are identified AND both perms ok.
