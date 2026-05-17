@@ -538,11 +538,16 @@ class App(ctk.CTk):
         )
 
     def _refresh_summaries(self) -> None:
-        mapping = self._bridge.keyboard.get_mapping()
+        config = self._bridge.keyboard.get_config()
         for ui in self._pucks.values():
             for button, (_glyph, key_lbl) in ui.summary_entries.items():
-                key = mapping.get(button)
-                key_lbl.configure(text=f"→ {format_key(key)}" if key else "→ —")
+                key = config.mapping.get(button)
+                if not key:
+                    key_lbl.configure(text="→ —")
+                    continue
+                rep = config.repeats_for(button)
+                suffix = f" ×{rep}" if rep > 1 else ""
+                key_lbl.configure(text=f"→ {format_key(key)}{suffix}")
 
     def _refresh_state(self) -> None:
         """Recompute dot colors and hint. Skips no-op .configure() calls."""
@@ -780,13 +785,13 @@ class App(ctk.CTk):
     def _open_keymap_dialog(self) -> None:
         keyboard = self._bridge.keyboard
 
-        def apply(mapping):
-            keyboard.set_mapping(mapping)
+        def apply(config):
+            keyboard.set_config(config)
             self._refresh_summaries()
 
         KeymapDialog(
             self,
-            current=keyboard.get_mapping(),
+            current=keyboard.get_config(),
             on_apply=apply,
         )
 

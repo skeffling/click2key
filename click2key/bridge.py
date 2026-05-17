@@ -62,4 +62,4 @@ async def run_bridge(click: ClickV2, bridge: Bridge) -> None:
                 bridge.ui_sink(event)
             except Exception:
                 log.exception("ui_sink failed")
-        bridge.keyboard.send(event)
+        await bridge.keyboard.send(event)
