@@ -66,8 +66,8 @@ app = BUNDLE(
     info_plist={
         'CFBundleName': 'Click2Key',
         'CFBundleDisplayName': 'Click2Key',
-        'CFBundleShortVersionString': '0.1.1',
-        'CFBundleVersion': '0.1.1',
+        'CFBundleShortVersionString': '0.1.2',
+        'CFBundleVersion': '0.1.2',
         'LSMinimumSystemVersion': '11.0',
         'NSHighResolutionCapable': True,
         # macOS shows this string in the Bluetooth permission prompt on first
