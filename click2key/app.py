@@ -584,7 +584,7 @@ class App(ctk.CTk):
         elif not visible and widget.winfo_ismapped():
             widget.pack_forget()
 
-    def _flash_glyph(self, puck: Puck, button: Button | None) -> None:
+    def _set_glyph_pressed(self, puck: Puck, button: Button | None, pressed: bool) -> None:
         if button is None:
             return
         ui = self._pucks.get(puck)
@@ -593,8 +593,19 @@ class App(ctk.CTk):
         lbl = ui.glyphs.get(button)
         if lbl is None:
             return
-        lbl.configure(font=self._bold_font)
-        self.after(180, lambda: lbl.configure(font=self._normal_font))
+        if pressed:
+            lbl.configure(
+                font=self._bold_font,
+                fg_color=DOT_ON,
+                text_color="white",
+                corner_radius=4,
+            )
+        else:
+            lbl.configure(
+                font=self._normal_font,
+                fg_color="transparent",
+                text_color=("gray10", "gray90"),
+            )
 
     def _set_scanning(self, scanning: bool) -> None:
         if scanning:
@@ -751,8 +762,7 @@ class App(ctk.CTk):
         if ui is not None and not ui.identified:
             ui.identified = True
             self._refresh_state()
-        if event.is_down:
-            self._flash_glyph(event.puck, event.button)
+        self._set_glyph_pressed(event.puck, event.button, event.is_down)
 
     async def _scan_and_connect(self) -> None:
         self._post_to_ui(lambda: self._set_scanning(True))
