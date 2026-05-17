@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import queue
 import subprocess
 import sys
 import threading
@@ -195,19 +196,34 @@ log = logging.getLogger(__name__)
 
 
 class TkLogHandler(logging.Handler):
+    """Buffers log lines in a thread-safe queue; the Tk thread drains it.
+
+    Calling Tk APIs (including after()) from a non-Tk thread can deadlock
+    the Tcl interpreter, and logging fires from every thread.
+    """
+
     def __init__(self, textbox: ctk.CTkTextbox) -> None:
         super().__init__()
         self._textbox = textbox
+        self._pending: queue.Queue[str] = queue.Queue()
+        textbox.after(50, self._drain)
 
     def emit(self, record: logging.LogRecord) -> None:
-        msg = self.format(record) + "\n"
-        self._textbox.after(0, self._append, msg)
+        self._pending.put(self.format(record) + "\n")
 
-    def _append(self, msg: str) -> None:
-        self._textbox.configure(state="normal")
-        self._textbox.insert("end", msg)
-        self._textbox.see("end")
-        self._textbox.configure(state="disabled")
+    def _drain(self) -> None:
+        msgs: list[str] = []
+        try:
+            while True:
+                msgs.append(self._pending.get_nowait())
+        except queue.Empty:
+            pass
+        if msgs:
+            self._textbox.configure(state="normal")
+            self._textbox.insert("end", "".join(msgs))
+            self._textbox.see("end")
+            self._textbox.configure(state="disabled")
+        self._textbox.after(50, self._drain)
 
 
 class App(ctk.CTk):
@@ -221,6 +237,12 @@ class App(ctk.CTk):
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
         self._loop_thread.start()
+
+        # Cross-thread UI work goes through this queue and is drained on the
+        # Tk thread by _drain_ui_queue. Calling Tk APIs (including after())
+        # from the asyncio thread can deadlock the Tcl interpreter — observed
+        # as both threads parked in __psynch_cvwait.
+        self._ui_queue: queue.Queue = queue.Queue()
 
         # One ClickV2 per BLE-connected puck. Keyed by device address.
         self._clicks: dict[str, ClickV2] = {}
@@ -400,6 +422,8 @@ class App(ctk.CTk):
         self._refresh_state()
         # Cheap periodic poll so permission grants show up without a restart.
         self.after(3000, self._tick_refresh)
+        # Pump cross-thread UI work scheduled from the asyncio thread.
+        self.after(30, self._drain_ui_queue)
 
         # Now that the Tk log handler is in place, log the path so the user
         # can find it in the debug pane (not just terminal stderr).
@@ -535,6 +559,22 @@ class App(ctk.CTk):
     def _tick_refresh(self) -> None:
         self._refresh_state()
         self.after(3000, self._tick_refresh)
+
+    def _post_to_ui(self, fn: Callable[[], None]) -> None:
+        """Thread-safe: schedule fn to run on the Tk main thread."""
+        self._ui_queue.put(fn)
+
+    def _drain_ui_queue(self) -> None:
+        try:
+            while True:
+                fn = self._ui_queue.get_nowait()
+                try:
+                    fn()
+                except Exception:
+                    log.exception("UI callback failed")
+        except queue.Empty:
+            pass
+        self.after(30, self._drain_ui_queue)
 
     @staticmethod
     def _toggle_packed(widget, visible: bool, **pack_kw) -> None:
@@ -693,8 +733,10 @@ class App(ctk.CTk):
         await self._scan_and_connect()
 
     def _on_button_event(self, event: ButtonEvent) -> None:
-        # Runs on the asyncio thread. Marshal UI updates onto Tk's main loop.
-        self.after(0, self._apply_button_event, event)
+        # Runs on the asyncio thread. Marshal UI updates onto Tk's main loop
+        # via a thread-safe queue; Tk's after() is not safe to call across
+        # threads and will occasionally deadlock the Tcl interpreter.
+        self._post_to_ui(lambda: self._apply_button_event(event))
 
     def _apply_button_event(self, event: ButtonEvent) -> None:
         ui = self._pucks.get(event.puck)
@@ -713,12 +755,12 @@ class App(ctk.CTk):
             self._flash_glyph(event.puck, event.button)
 
     async def _scan_and_connect(self) -> None:
-        self.after(0, self._set_scanning, True)
+        self._post_to_ui(lambda: self._set_scanning(True))
         log.info("Scanning for Click V2…")
         try:
             devices = await ClickV2.scan()
         finally:
-            self.after(0, self._set_scanning, False)
+            self._post_to_ui(lambda: self._set_scanning(False))
         if not devices:
             log.warning("No Click devices found")
             return
@@ -738,7 +780,7 @@ class App(ctk.CTk):
             self._bridge_tasks[dev.address] = asyncio.create_task(
                 run_bridge(click, self._bridge)
             )
-            self.after(0, self._refresh_state)
+            self._post_to_ui(self._refresh_state)
 
         await asyncio.gather(*(connect_one(d) for d in devices))
 
