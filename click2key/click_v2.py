@@ -184,12 +184,27 @@ class ClickV2:
         log.info("Subscribed to async + sync RX")
 
         await self._handshake()
+        # Prime the battery reading now so the UI doesn't have to wait up to
+        # 30s (or for an unsolicited notify) before showing a percentage.
+        await self._read_battery_once()
         # Read-only keepalive: poll battery level every 30s. No GATT writes,
-        # which previously silenced or hung the puck. We don't surface the
-        # value — just doing the read may be enough to keep the BLE peer's
-        # idle timer fed.
+        # which previously silenced or hung the puck. The read value is also
+        # used to populate battery_percent for pucks that don't push notifies.
         self._keepalive_task = asyncio.create_task(self._keepalive_loop())
         log.info("Click V2 ready (greeting sent, read-only keepalive)")
+
+    async def _read_battery_once(self) -> None:
+        assert self._client is not None
+        try:
+            data = await self._client.read_gatt_char(BATTERY_LEVEL_CHAR_UUID)
+        except Exception:
+            log.exception("Battery read failed")
+            return
+        if data:
+            pct = data[0]
+            if pct != self._last_battery:
+                log.info("Battery (read): %d%%", pct)
+            self._last_battery = pct
 
     async def _keepalive_loop(self) -> None:
         assert self._client is not None
@@ -197,8 +212,7 @@ class ClickV2:
             while self._client.is_connected:
                 await asyncio.sleep(KEEPALIVE_INTERVAL_SECONDS)
                 try:
-                    await self._client.read_gatt_char(BATTERY_LEVEL_CHAR_UUID)
-                    log.debug("keepalive: battery read")
+                    await self._read_battery_once()
                 except Exception:
                     log.exception("Keepalive read failed; stopping loop")
                     return
