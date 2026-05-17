@@ -187,9 +187,11 @@ class _PuckUi:
     dot: ctk.CTkLabel
     glyphs: dict[Button, ctk.CTkLabel]
     hint: ctk.CTkLabel
+    battery: ctk.CTkLabel
     identified: bool = False
     last_dot_color: str = DOT_OFF
     last_hint: str = ""
+    last_battery: str = ""
 
 
 log = logging.getLogger(__name__)
@@ -485,9 +487,12 @@ class App(ctk.CTk):
             if button is not None:
                 glyphs[button] = lbl
 
+        battery = ctk.CTkLabel(title, text="", text_color="gray60")
+        battery.pack(side="left", padx=(8, 0))
+
         hint = ctk.CTkLabel(card, text="", anchor="w", text_color="gray60")
         hint.pack(fill="x", anchor="w", padx=(22, 0), pady=(0, 0))
-        return _PuckUi(dot=dot, glyphs=glyphs, hint=hint)
+        return _PuckUi(dot=dot, glyphs=glyphs, hint=hint, battery=battery)
 
     def _refresh_state(self) -> None:
         """Recompute dot colors and hint. Skips no-op .configure() calls."""
@@ -541,7 +546,14 @@ class App(ctk.CTk):
         elif (not all_identified or not perms_ok) and not self._setup_panel.winfo_ismapped():
             self._setup_panel.pack(fill="x", padx=12, pady=(8, 0), before=self._pucks_row)
 
-        for ui in self._pucks.values():
+        # Map each connected ClickV2 to its identified puck (if any) so we
+        # can surface its battery reading on the matching card.
+        battery_by_puck: dict[Puck, int] = {}
+        for click in self._clicks.values():
+            if click.puck_identity is not None and click.battery_percent is not None:
+                battery_by_puck[click.puck_identity] = click.battery_percent
+
+        for puck, ui in self._pucks.items():
             if ui.identified:
                 color, hint_text = DOT_ON, ""
             elif ble_count > 0:
@@ -554,6 +566,11 @@ class App(ctk.CTk):
             if hint_text != ui.last_hint:
                 ui.hint.configure(text=hint_text)
                 ui.last_hint = hint_text
+            pct = battery_by_puck.get(puck)
+            battery_text = f"battery {pct}%" if pct is not None else ""
+            if battery_text != ui.last_battery:
+                ui.battery.configure(text=battery_text)
+                ui.last_battery = battery_text
 
         if all_identified:
             hint = "Ready. Keystrokes go to whichever app has focus."

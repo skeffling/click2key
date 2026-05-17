@@ -121,6 +121,12 @@ class ClickV2:
         self._last_bitmap: int | None = None
         self._last_battery: int | None = None
         self._last_event_at: float | None = None
+        # Set once we see a button event whose bit maps to a known puck.
+        self.puck_identity: "Puck | None" = None
+
+    @property
+    def battery_percent(self) -> int | None:
+        return self._last_battery
 
     # ~Time after connect with no button events that we call a puck "silent"
     # (the V2's well-known 60-second sleep). BikeControl uses 60s for the same
@@ -297,6 +303,8 @@ class ClickV2:
         if info is None:
             return ButtonEvent(bit=bit, puck=Puck.UNKNOWN, button=None, is_down=is_down)
         puck, button = info
+        if self.puck_identity is None:
+            self.puck_identity = puck
         return ButtonEvent(bit=bit, puck=puck, button=button, is_down=is_down)
 
     def _on_sync_notify(self, _char, data: bytearray) -> None:
