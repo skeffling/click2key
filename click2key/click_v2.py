@@ -120,6 +120,7 @@ class ClickV2:
         self._connected_at: float | None = None
         self._last_bitmap: int | None = None
         self._last_battery: int | None = None
+        self._last_event_at: float | None = None
 
     # ~Time after connect with no button events that we call a puck "silent"
     # (the V2's well-known 60-second sleep). BikeControl uses 60s for the same
@@ -128,10 +129,21 @@ class ClickV2:
 
     @property
     def is_silent(self) -> bool:
-        """True if BLE-connected for >threshold but no button events received."""
-        if self._connected_at is None or self._last_bitmap is not None:
+        """True if the puck has gone quiet past the post-connect grace period.
+
+        Catches both "never sent anything" and "sent only during the first
+        ~minute then stopped" — the second is the classic V2 60s-sleep
+        signature, where the puck releases the wake-press during connect
+        then stops responding.
+        """
+        if self._connected_at is None:
             return False
-        return (time.monotonic() - self._connected_at) > self.SILENT_THRESHOLD_SECONDS
+        elapsed = time.monotonic() - self._connected_at
+        if elapsed <= self.SILENT_THRESHOLD_SECONDS:
+            return False
+        if self._last_event_at is None:
+            return True
+        return (self._last_event_at - self._connected_at) <= self.SILENT_THRESHOLD_SECONDS
 
     @staticmethod
     async def scan(timeout: float = 8.0) -> list[BLEDevice]:
@@ -262,6 +274,8 @@ class ClickV2:
         self._last_bitmap = bitmap
         if last is None or last == bitmap:
             return
+        # Used by is_silent: any bit transition counts as "puck is alive."
+        self._last_event_at = time.monotonic()
         # Active-low: a 1→0 transition means "pressed"; 0→1 means "released".
         # Iterate only the bits that actually changed.
         changed = last ^ bitmap
