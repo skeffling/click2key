@@ -1,0 +1,38 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -e ".[dev]"
+      - run: pyinstaller --noconfirm click2key.spec
+      - run: ditto -c -k --keepParent dist/Click2Key.app dist/Click2Key-macos-arm64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Click2Key-macos-arm64
+          path: dist/Click2Key-macos-arm64.zip
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -e ".[dev]"
+      - run: pyinstaller --noconfirm click2key.spec
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Click2Key-windows-x64
+          path: dist/Click2Key
