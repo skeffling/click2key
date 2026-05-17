@@ -17,13 +17,12 @@ Runs on macOS and Windows.
 
 ## Install (macOS)
 
-Grab the latest `Click2Key.app` from `dist/` after building, or build
-yourself:
+Download `Click2Key-macos-arm64.zip` from the
+[latest release](https://github.com/skeffling/click2key/releases/latest),
+then:
 
 ```bash
-python3 -m venv .venv
-./build_macos.sh
-mv "dist/Click2Key.app" /Applications/
+unzip ~/Downloads/Click2Key-macos-arm64.zip -d /Applications/
 xattr -dr com.apple.quarantine "/Applications/Click2Key.app"
 open "/Applications/Click2Key.app"
 ```
@@ -32,17 +31,23 @@ First run: macOS prompts for **Bluetooth**. Then grant **Accessibility** in
 System Settings → Privacy & Security → Accessibility — add
 `/Applications/Click2Key.app`. Quit + relaunch.
 
+Prefer to build from source? `python3 -m venv .venv && ./build_macos.sh`
+drops `Click2Key.app` in `dist/`.
+
 ## Install (Windows)
 
-On a Windows machine with Python 3.12+:
+Download `Click2Key-windows-x64.zip` from the
+[latest release](https://github.com/skeffling/click2key/releases/latest),
+unzip it anywhere, and run `Click2Key.exe` inside the unzipped folder.
+The `.exe` needs the sibling `_internal\` directory, so keep the folder
+intact.
+
+To build yourself on a Windows machine with Python 3.12+:
 
 ```cmd
 py -m venv .venv
 build_windows.bat
 ```
-
-Distribute the entire `dist\Click2Key\` folder — the `.exe` needs the
-`_internal\` directory next to it.
 
 ## Use it
 
