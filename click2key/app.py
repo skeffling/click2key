@@ -315,6 +315,13 @@ class App(ctk.CTk):
         self._scan_spinner = ctk.CTkProgressBar(
             top_bar, mode="indeterminate", width=110,
         )
+        # Packed only when at least one puck is BLE-connected. Disconnecting
+        # lets the pucks fall back to their 60s sleep and stop draining battery.
+        self._disconnect_btn = ctk.CTkButton(
+            top_bar, text="Disconnect", width=110,
+            command=self._on_disconnect_click,
+            fg_color="gray40", hover_color="gray30",
+        )
 
         ctk.CTkLabel(
             self, text="Convert Zwift Click2 buttons into keyboard keys",
@@ -538,6 +545,10 @@ class App(ctk.CTk):
     def _refresh_state(self) -> None:
         """Recompute dot colors and hint. Skips no-op .configure() calls."""
         ble_count = len(self._clicks)
+        self._toggle_packed(
+            self._disconnect_btn, ble_count > 0,
+            side="right", padx=(0, 8),
+        )
 
         # Permission status — cached so a granted permission isn't re-probed
         # via CoreBluetooth/AX on every 3s tick. The whole permissions concept
@@ -699,6 +710,28 @@ class App(ctk.CTk):
 
     def _on_scan_click(self) -> None:
         self._submit(self._scan_and_connect())
+
+    def _on_disconnect_click(self) -> None:
+        self._submit(self._disconnect_all())
+
+    async def _disconnect_all(self) -> None:
+        log.info("Disconnecting %d puck(s); they will sleep after ~60s.",
+                 len(self._clicks))
+        for task in self._bridge_tasks.values():
+            task.cancel()
+        self._bridge_tasks.clear()
+        for click in list(self._clicks.values()):
+            try:
+                await click.disconnect()
+            except Exception:
+                log.exception("Disconnect failed")
+        self._clicks.clear()
+
+        def reset_ui() -> None:
+            for ui in self._pucks.values():
+                ui.identified = False
+            self._refresh_state()
+        self._post_to_ui(reset_ui)
 
     def _open_accessibility_settings(self) -> None:
         target = _accessibility_target()
