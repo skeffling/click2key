@@ -426,17 +426,19 @@ class App(ctk.CTk):
         self.after(30, self._drain_ui_queue)
 
         # Now that the Tk log handler is in place, log the path so the user
-        # can find it in the debug pane (not just terminal stderr).
-        log.info(
-            "macOS Accessibility target (add this in System Settings):\n    %s",
-            _accessibility_target(),
-        )
-        trusted = _accessibility_trusted()
-        if trusted is False:
-            log.warning("Accessibility NOT granted. Keystrokes will be "
-                        "silently dropped by macOS until you grant it.")
-        elif trusted is True:
-            log.info("Accessibility is granted — keystrokes will fire.")
+        # can find it in the debug pane (not just terminal stderr). macOS-only:
+        # Windows has no Accessibility-style grant for synthetic input.
+        if sys.platform == "darwin":
+            log.info(
+                "macOS Accessibility target (add this in System Settings):\n    %s",
+                _accessibility_target(),
+            )
+            trusted = _accessibility_trusted()
+            if trusted is False:
+                log.warning("Accessibility NOT granted. Keystrokes will be "
+                            "silently dropped by macOS until you grant it.")
+            elif trusted is True:
+                log.info("Accessibility is granted — keystrokes will fire.")
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -492,9 +494,14 @@ class App(ctk.CTk):
         ble_count = len(self._clicks)
 
         # Permission status — cached so a granted permission isn't re-probed
-        # via CoreBluetooth/AX on every 3s tick.
-        bt = self._bt_perm.is_granted()
-        ax = self._ax_perm.is_granted()
+        # via CoreBluetooth/AX on every 3s tick. The whole permissions concept
+        # is macOS-only; on Windows BLE + keystroke synthesis need no user
+        # grant, so treat both as granted to suppress the perm row/buttons.
+        if sys.platform != "darwin":
+            bt = ax = True
+        else:
+            bt = self._bt_perm.is_granted()
+            ax = self._ax_perm.is_granted()
         perms_ok = bt is True and ax is True
 
         # Hide the whole permission row when everything's granted. Otherwise
