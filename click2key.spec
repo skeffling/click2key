@@ -45,6 +45,9 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    # Used for the Windows .exe icon (Explorer + window title bar). The BUNDLE
+    # below sets the macOS icon separately from icon.icns.
+    icon='assets/icon.ico',
 )
 
 coll = COLLECT(

@@ -502,7 +502,9 @@ class App(ctk.CTk):
 
         glyphs: dict[Button, ctk.CTkLabel] = {}
         for text, button in layout:
-            lbl = ctk.CTkLabel(title, text=text, font=self._normal_font)
+            color = BUTTON_COLORS.get(button) if button is not None else None
+            kwargs = {"text_color": color} if color else {}
+            lbl = ctk.CTkLabel(title, text=text, font=self._normal_font, **kwargs)
             lbl.pack(side="left", padx=0)
             if button is not None:
                 glyphs[button] = lbl
@@ -619,9 +621,18 @@ class App(ctk.CTk):
                 ui.hint.configure(text=hint_text)
                 ui.last_hint = hint_text
             pct = battery_by_puck.get(puck)
-            battery_text = f"battery {pct}%" if pct is not None else ""
+            if pct is None:
+                battery_text, battery_color = "", "gray60"
+            else:
+                battery_text = f"battery {pct}%"
+                if pct < 10:
+                    battery_color = "#cc3333"  # red
+                elif pct < 30:
+                    battery_color = "#d8a200"  # amber, matches DOT_PENDING
+                else:
+                    battery_color = "gray60"
             if battery_text != ui.last_battery:
-                ui.battery.configure(text=battery_text)
+                ui.battery.configure(text=battery_text, text_color=battery_color)
                 ui.last_battery = battery_text
 
         if all_identified:
@@ -680,7 +691,7 @@ class App(ctk.CTk):
             lbl.configure(
                 font=self._normal_font,
                 fg_color="transparent",
-                text_color=("gray10", "gray90"),
+                text_color=BUTTON_COLORS.get(button, ("gray10", "gray90")),
             )
 
     def _set_scanning(self, scanning: bool) -> None:
