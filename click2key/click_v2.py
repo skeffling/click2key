@@ -153,12 +153,22 @@ class ClickV2:
 
     @staticmethod
     async def scan(timeout: float = 8.0) -> list[BLEDevice]:
-        """Return BLE devices that advertise the Zwift custom service."""
-        devices = await BleakScanner.discover(
-            timeout=timeout, service_uuids=[ZWIFT_CUSTOM_SERVICE_UUID]
-        )
-        # Some adapters don't filter by service UUID in the scan call; filter again.
-        return [d for d in devices if d.name and "click" in d.name.lower()]
+        """Return BLE devices that look like a Zwift Click V2.
+
+        We deliberately don't pass `service_uuids=` to BleakScanner: on the
+        Windows/WinRT backend that becomes a kernel-side advertisement filter,
+        and Zwift pucks often only put their service UUID in the scan-response
+        (not the primary advertisement), so the filtered scan returns nothing.
+        Scan everything and match by name or advertised service UUID instead.
+        """
+        discovered = await BleakScanner.discover(timeout=timeout, return_adv=True)
+        matches: list[BLEDevice] = []
+        for device, adv in discovered.values():
+            name = (device.name or adv.local_name or "").lower()
+            uuids = {u.lower() for u in (adv.service_uuids or [])}
+            if "click" in name or ZWIFT_CUSTOM_SERVICE_UUID.lower() in uuids:
+                matches.append(device)
+        return matches
 
     async def connect(self, device: BLEDevice) -> None:
         log.info("Connecting to %s (%s)", device.name, device.address)
