@@ -16,7 +16,7 @@ import os
 import subprocess
 import sys
 import threading
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -93,6 +93,25 @@ def _accessibility_trusted() -> bool | None:
         return None
 
 
+class _PermissionCache:
+    """Caches a permission check so we don't hammer native frameworks.
+
+    Permission grants are rare (user action in System Settings). Once a
+    permission resolves to True, we trust it forever; while it's False
+    we keep polling so the UI lights up shortly after the user grants.
+    """
+
+    def __init__(self, probe):
+        self._probe = probe
+        self._granted: bool | None = None
+
+    def is_granted(self) -> bool | None:
+        if self._granted is True:
+            return True
+        self._granted = self._probe()
+        return self._granted
+
+
 def _accessibility_target() -> str:
     """Best macOS Accessibility target for the running process.
 
@@ -103,7 +122,6 @@ def _accessibility_target() -> str:
       framework's Python.app bundle.
     - Fallback: the resolved python binary.
     """
-    import os
     real = os.path.realpath(sys.executable)
 
     # Bundled-app case: walk up until we find a dir ending in '.app'.
@@ -216,6 +234,8 @@ class App(ctk.CTk):
         # lives in _refresh_state.
         self._pucks: dict[Puck, _PuckUi] = {}
         self._last_hint = ""
+        self._bt_perm = _PermissionCache(_bluetooth_authorized)
+        self._ax_perm = _PermissionCache(_accessibility_trusted)
         # Reusable fonts so the per-press flash doesn't allocate.
         self._normal_font: ctk.CTkFont | None = None
         self._bold_font: ctk.CTkFont | None = None
@@ -273,26 +293,11 @@ class App(ctk.CTk):
         ctk.CTkLabel(
             self._perm_row, text="Permissions:", font=ctk.CTkFont(weight="bold"),
         ).pack(side="left", padx=(0, 8))
-        self._bt_dot = ctk.CTkLabel(
-            self._perm_row, text="●", font=ctk.CTkFont(size=14),
-            text_color=DOT_OFF, width=14,
+        self._bt_dot, self._bt_fix_btn = self._build_permission_row(
+            "Bluetooth", self._open_bluetooth_settings, leading_padx=0,
         )
-        self._bt_dot.pack(side="left")
-        ctk.CTkLabel(self._perm_row, text="Bluetooth").pack(side="left", padx=(2, 4))
-        self._bt_fix_btn = ctk.CTkButton(
-            self._perm_row, text="Open Settings", width=110, height=22,
-            command=self._open_bluetooth_settings,
-        )
-        # Visibility controlled by _refresh_state.
-        self._ax_dot = ctk.CTkLabel(
-            self._perm_row, text="●", font=ctk.CTkFont(size=14),
-            text_color=DOT_OFF, width=14,
-        )
-        self._ax_dot.pack(side="left", padx=(12, 0))
-        ctk.CTkLabel(self._perm_row, text="Accessibility").pack(side="left", padx=(2, 4))
-        self._ax_fix_btn = ctk.CTkButton(
-            self._perm_row, text="Open Settings", width=110, height=22,
-            command=self._open_accessibility_settings,
+        self._ax_dot, self._ax_fix_btn = self._build_permission_row(
+            "Accessibility", self._open_accessibility_settings, leading_padx=12,
         )
 
         self._perm_hint = ctk.CTkLabel(
@@ -411,6 +416,23 @@ class App(ctk.CTk):
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
+    def _build_permission_row(
+        self, name: str, on_fix: Callable[[], None], leading_padx: int,
+    ) -> tuple[ctk.CTkLabel, ctk.CTkButton]:
+        """Dot + label + (visibility-controlled) 'Open Settings' button."""
+        dot = ctk.CTkLabel(
+            self._perm_row, text="●", font=ctk.CTkFont(size=14),
+            text_color=DOT_OFF, width=14,
+        )
+        dot.pack(side="left", padx=(leading_padx, 0))
+        ctk.CTkLabel(self._perm_row, text=name).pack(side="left", padx=(2, 4))
+        # Not packed here; _refresh_state shows/hides based on permission state.
+        fix_btn = ctk.CTkButton(
+            self._perm_row, text="Open Settings", width=110, height=22,
+            command=on_fix,
+        )
+        return dot, fix_btn
+
     def _build_puck_row(
         self,
         parent: ctk.CTkFrame,
@@ -445,10 +467,10 @@ class App(ctk.CTk):
         """Recompute dot colors and hint. Skips no-op .configure() calls."""
         ble_count = len(self._clicks)
 
-        # Permission status — recompute on every refresh so manual grants in
-        # System Settings show up after the user clicks back into the app.
-        bt = _bluetooth_authorized()
-        ax = _accessibility_trusted()
+        # Permission status — cached so a granted permission isn't re-probed
+        # via CoreBluetooth/AX on every 3s tick.
+        bt = self._bt_perm.is_granted()
+        ax = self._ax_perm.is_granted()
         self._bt_dot.configure(text_color=DOT_ON if bt is True else DOT_OFF)
         self._ax_dot.configure(text_color=DOT_ON if ax is True else DOT_OFF)
         if bt is True:
@@ -558,12 +580,8 @@ class App(ctk.CTk):
         self._open_system_settings(
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
             "Accessibility",
+            reveal=target,
         )
-        # Pop a Finder window at the target so the user can drag it in.
-        try:
-            subprocess.Popen(["open", "-R", target])
-        except Exception:
-            log.exception("Could not reveal %s in Finder", target)
 
     def _open_bluetooth_settings(self) -> None:
         self._open_system_settings(
@@ -571,7 +589,7 @@ class App(ctk.CTk):
             "Bluetooth",
         )
 
-    def _open_system_settings(self, url: str, name: str) -> None:
+    def _open_system_settings(self, url: str, name: str, reveal: str | None = None) -> None:
         if sys.platform != "darwin":
             log.warning("System Settings shortcuts are macOS-only")
             return
@@ -580,6 +598,11 @@ class App(ctk.CTk):
             subprocess.Popen(["open", url])
         except Exception:
             log.exception("Failed to open System Settings")
+        if reveal is not None:
+            try:
+                subprocess.Popen(["open", "-R", reveal])
+            except Exception:
+                log.exception("Could not reveal %s in Finder", reveal)
 
     def _open_keymap_dialog(self) -> None:
         keyboard = self._bridge.keyboard

@@ -118,6 +118,8 @@ class ClickV2:
         self._device: BLEDevice | None = None
         self._keepalive_task: asyncio.Task | None = None
         self._connected_at: float | None = None
+        self._last_bitmap: int | None = None
+        self._last_battery: int | None = None
 
     # ~Time after connect with no button events that we call a puck "silent"
     # (the V2's well-known 60-second sleep). BikeControl uses 60s for the same
@@ -233,9 +235,6 @@ class ClickV2:
     # ------------------------------------------------------------------
     # Notification handlers
     # ------------------------------------------------------------------
-
-    _last_bitmap: int | None = None
-    _last_battery: int | None = None
 
     def _on_async_notify(self, _char, data: bytearray) -> None:
         payload = bytes(data)

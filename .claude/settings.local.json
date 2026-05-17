@@ -17,7 +17,8 @@
       "Bash(git -c commit.gpgsign=false commit -q -m 'Dedupe cross-puck button events + clean up puck labels *)",
       "Bash(git -c commit.gpgsign=false commit -q -m \"Compact puck rows: red/green dot + per-glyph bold flash on press\")",
       "Bash(git -c commit.gpgsign=false commit -q -m 'Debug pane: shortcuts to OS Accessibility/Bluetooth settings + test keystroke *)",
-      "Bash(git -c commit.gpgsign=false commit -q -m \"Real Accessibility check via AXIsProcessTrusted; report on startup and during test\")"
+      "Bash(git -c commit.gpgsign=false commit -q -m \"Real Accessibility check via AXIsProcessTrusted; report on startup and during test\")",
+      "Bash(python3 *)"
     ]
   }
 }
