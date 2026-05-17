@@ -261,7 +261,7 @@ class App(ctk.CTk):
         )
 
         ctk.CTkLabel(
-            self, text="Zwift Click V2  →  keyboard shortcuts",
+            self, text="Convert Zwift Click2 buttons into keyboard keys",
             text_color="gray60",
         ).pack(pady=(2, 0))
 
