@@ -44,6 +44,14 @@ ZWIFT_CUSTOM_SERVICE_UUID = "0000fc82-0000-1000-8000-00805f9b34fb"
 ZWIFT_ASYNC_CHAR_UUID = "00000002-19ca-4651-86e5-fa29dcdd09d1"
 ZWIFT_SYNC_TX_CHAR_UUID = "00000003-19ca-4651-86e5-fa29dcdd09d1"
 ZWIFT_SYNC_RX_CHAR_UUID = "00000004-19ca-4651-86e5-fa29dcdd09d1"
+# Three extra characteristics show up in the Click V2 GATT dump with
+# notify-capable properties; their purpose isn't yet known. Sniff them
+# during Phase A so we can see whether the real handshake/data flows here.
+ZWIFT_EXTRA_CHAR_UUIDS = (
+    "00000100-19ca-4651-86e5-fa29dcdd09d1",
+    "00000101-19ca-4651-86e5-fa29dcdd09d1",
+    "00000102-19ca-4651-86e5-fa29dcdd09d1",
+)
 # Standard Battery Service characteristic — readable, harmless to poll.
 BATTERY_LEVEL_CHAR_UUID = "00002a19-0000-1000-8000-00805f9b34fb"
 
@@ -135,11 +143,13 @@ class ClickV2:
         self._last_event_at: float | None = None
         # Set once we see a button event whose bit maps to a known puck.
         self.puck_identity: "Puck | None" = None
-        # CLICK2KEY_PLAINTEXT=1 forces the old unencrypted handshake (sends a
-        # short "RideOn" greeting, parses plaintext bitmap frames). Default
-        # is the real ECDH handshake; the plaintext path is a temporary
-        # escape hatch while Phase A captures V2 button payloads.
-        self._encrypted: bool = os.environ.get("CLICK2KEY_PLAINTEXT", "0") != "1"
+        # CLICK2KEY_ENCRYPTED=1 opts into the ECDH handshake research path
+        # (subscribes to extra characteristics, logs raw frames for analysis).
+        # The Click V2 firmware doesn't return an ECDH pubkey in its reply, so
+        # we don't yet know how to derive a session key; the plaintext bitmap
+        # path is the working default. Set this flag if you're investigating
+        # the V2 protocol or wiring up a future reference.
+        self._encrypted: bool = os.environ.get("CLICK2KEY_ENCRYPTED", "0") == "1"
         self._key_exchange: ZapKeyExchange | None = None
         self._cipher: ZapCipher | None = None
         self._handshake_complete: bool = False
@@ -201,6 +211,20 @@ class ClickV2:
         # Subscribe BEFORE writing — otherwise we miss the handshake reply.
         await self._client.start_notify(ZWIFT_ASYNC_CHAR_UUID, self._on_async_notify)
         await self._client.start_notify(ZWIFT_SYNC_RX_CHAR_UUID, self._on_sync_notify)
+        # Research mode (CLICK2KEY_ENCRYPTED=1) also sniffs the three
+        # undocumented characteristics so future protocol work can see if any
+        # of them carry the V2 handshake/data. Skipped in normal use.
+        if self._encrypted:
+            for uuid in ZWIFT_EXTRA_CHAR_UUIDS:
+                try:
+                    short = uuid[6:8]
+                    await self._client.start_notify(
+                        uuid, lambda _c, data, s=short: log.info(
+                            "EXTRA RX 0x01%s (%d bytes): %s", s, len(data), bytes(data).hex(),
+                        ),
+                    )
+                except Exception:
+                    log.debug("Couldn't subscribe to %s", uuid)
         log.info("Subscribed to async + sync RX")
 
         await self._handshake()
@@ -264,10 +288,17 @@ class ClickV2:
         assert self._client is not None
         if self._encrypted:
             self._key_exchange = ZapKeyExchange()
+            # CLICK2KEY_REQUEST_START=hex (e.g. 0102, 0103) overrides the
+            # 2-byte code after RideOn so we can probe Click V2 variants.
+            override = os.environ.get("CLICK2KEY_REQUEST_START", "")
+            req_start = bytes.fromhex(override) if override else REQUEST_START
             greeting = (
-                RIDE_ON + REQUEST_START + self._key_exchange.local_pub_bytes()
+                RIDE_ON + req_start + self._key_exchange.local_pub_bytes()
             )
-            log.info("Handshake TX (encrypted, %d bytes)", len(greeting))
+            log.info(
+                "Handshake TX (encrypted, %d bytes, REQUEST_START=%s)",
+                len(greeting), req_start.hex(),
+            )
         else:
             # Legacy plaintext bypass — short "RideOn" greeting puts the puck
             # into the unencrypted compatibility mode that emits 0x23 0x08
@@ -309,7 +340,9 @@ class ClickV2:
                 log.info("Battery: %d%%", pct)
                 self._last_battery = pct
             return
-        log.debug("ASYNC RX (%d bytes, unhandled): %s", len(payload), payload.hex())
+        # Verbose only in encryption-research mode.
+        level = logging.INFO if self._encrypted else logging.DEBUG
+        log.log(level, "ASYNC RX (%d bytes, unhandled): %s", len(payload), payload.hex())
 
     # Type codes inside decrypted frames; see ajchellew/zwiftplay ZapConstants.
     _TYPE_CONTROLLER = 7
@@ -373,23 +406,33 @@ class ClickV2:
 
     def _on_sync_notify(self, _char, data: bytearray) -> None:
         payload = bytes(data)
-        log.debug("SYNC RX (%d bytes): %s", len(payload), payload.hex())
-        # Encrypted handshake reply: RIDE_ON || RESPONSE_START || device_pub(64).
-        prefix = RIDE_ON + RESPONSE_START
-        if (
-            self._encrypted
-            and self._key_exchange is not None
-            and not self._handshake_complete
-            and payload.startswith(prefix)
-            and len(payload) == len(prefix) + PUBKEY_RAW_LENGTH
-        ):
-            device_pub = payload[len(prefix):]
-            try:
-                aes_key, iv_prefix = self._key_exchange.derive(device_pub)
-                self._cipher = ZapCipher(aes_key, iv_prefix)
-            except Exception:
-                log.exception("Failed to derive session keys; staying plaintext")
-                return
-            self._handshake_complete = True
-            log.info("Handshake complete: encrypted session established")
+        # Verbose only in encryption-research mode; quiet for normal users.
+        level = logging.INFO if self._encrypted else logging.DEBUG
+        log.log(level, "SYNC RX (%d bytes): %s", len(payload), payload.hex())
+        # Generic RideOn-prefixed reply: log the 2-byte response code that
+        # follows so we can see what the V2 actually returns. Reference V1
+        # uses 01 03; observed V2 returns 02 03 with no pubkey payload.
+        if payload.startswith(RIDE_ON) and len(payload) >= len(RIDE_ON) + 2:
+            response_code = payload[len(RIDE_ON):len(RIDE_ON) + 2]
+            body = payload[len(RIDE_ON) + 2:]
+            log.log(
+                level,
+                "Handshake reply: response_code=%s body_len=%d body=%s",
+                response_code.hex(), len(body), body.hex(),
+            )
+            if (
+                self._encrypted
+                and self._key_exchange is not None
+                and not self._handshake_complete
+                and response_code == RESPONSE_START
+                and len(body) == PUBKEY_RAW_LENGTH
+            ):
+                try:
+                    aes_key, iv_prefix = self._key_exchange.derive(body)
+                    self._cipher = ZapCipher(aes_key, iv_prefix)
+                except Exception:
+                    log.exception("Failed to derive session keys")
+                    return
+                self._handshake_complete = True
+                log.info("Handshake complete: encrypted session established")
 
