@@ -28,6 +28,7 @@ from PIL import Image
 from .bridge import Bridge, run_bridge
 from .click_v2 import Button, ButtonEvent, ClickV2, Puck
 from .keyboard_out import KeyboardOutput
+from .keymap import format_key
 from .keymap_dialog import KeymapDialog
 
 DOT_OFF = "#888888"
@@ -181,6 +182,14 @@ _LAYOUTS: dict[Puck, tuple[str, list[tuple[str, Button | None]]]] = {
     Puck.RIGHT: ("Right puck", _RIGHT_LAYOUT),
 }
 
+# Physical button colors on the left puck (identified by eye on the device).
+BUTTON_COLORS: dict[Button, str] = {
+    Button.A: "#33aa55",  # green, right of diamond
+    Button.B: "#cc33aa",  # magenta, bottom
+    Button.Y: "#3366cc",  # blue, top
+    Button.Z: "#cc6600",  # orange, left
+}
+
 
 @dataclass
 class _PuckUi:
@@ -188,6 +197,9 @@ class _PuckUi:
     glyphs: dict[Button, ctk.CTkLabel]
     hint: ctk.CTkLabel
     battery: ctk.CTkLabel
+    summary_frame: ctk.CTkFrame
+    # button → (glyph label, key label) so we can repaint when keymap changes
+    summary_entries: dict[Button, tuple[ctk.CTkLabel, ctk.CTkLabel]]
     identified: bool = False
     last_dot_color: str = DOT_OFF
     last_hint: str = ""
@@ -358,6 +370,7 @@ class App(ctk.CTk):
             self._pucks[puck] = self._build_puck_row(self._pucks_row, name, layout, column)
         self._pucks_row.grid_columnconfigure(0, weight=1)
         self._pucks_row.grid_columnconfigure(1, weight=1)
+        self._refresh_summaries()
 
         self._hint_label = ctk.CTkLabel(
             self, text="", anchor="w", text_color="gray60",
@@ -492,7 +505,35 @@ class App(ctk.CTk):
 
         hint = ctk.CTkLabel(card, text="", anchor="w", text_color="gray60")
         hint.pack(fill="x", anchor="w", padx=(22, 0), pady=(0, 0))
-        return _PuckUi(dot=dot, glyphs=glyphs, hint=hint, battery=battery)
+
+        # Summary row: "A → k   B → b   …" with each button glyph in its
+        # device color. Only the mapped buttons from this puck's layout appear.
+        summary_frame = ctk.CTkFrame(card, fg_color="transparent")
+        summary_frame.pack(fill="x", anchor="w", padx=(22, 0), pady=(2, 0))
+        summary_entries: dict[Button, tuple[ctk.CTkLabel, ctk.CTkLabel]] = {}
+        for text, button in layout:
+            if button is None or text.strip() == "":
+                continue
+            color = BUTTON_COLORS.get(button, "gray70")
+            glyph_lbl = ctk.CTkLabel(
+                summary_frame, text=text, text_color=color, font=self._bold_font,
+            )
+            glyph_lbl.pack(side="left")
+            key_lbl = ctk.CTkLabel(summary_frame, text="", text_color="gray60")
+            key_lbl.pack(side="left", padx=(2, 10))
+            summary_entries[button] = (glyph_lbl, key_lbl)
+
+        return _PuckUi(
+            dot=dot, glyphs=glyphs, hint=hint, battery=battery,
+            summary_frame=summary_frame, summary_entries=summary_entries,
+        )
+
+    def _refresh_summaries(self) -> None:
+        mapping = self._bridge.keyboard.get_mapping()
+        for ui in self._pucks.values():
+            for button, (_glyph, key_lbl) in ui.summary_entries.items():
+                key = mapping.get(button)
+                key_lbl.configure(text=f"→ {format_key(key)}" if key else "→ —")
 
     def _refresh_state(self) -> None:
         """Recompute dot colors and hint. Skips no-op .configure() calls."""
@@ -694,10 +735,15 @@ class App(ctk.CTk):
 
     def _open_keymap_dialog(self) -> None:
         keyboard = self._bridge.keyboard
+
+        def apply(mapping):
+            keyboard.set_mapping(mapping)
+            self._refresh_summaries()
+
         KeymapDialog(
             self,
             current=keyboard.get_mapping(),
-            on_apply=keyboard.set_mapping,
+            on_apply=apply,
         )
 
     _TEST_COUNTDOWN_SECONDS = 4
