@@ -102,3 +102,20 @@ python3 -m venv .venv
   reference (encrypted handshake; turns out V2 also speaks the plaintext
   bitmap protocol if you skip ECDH).
 - <https://github.com/OpenBikeControl/bikecontrol> — inspiration.
+
+## Disclaimers
+
+### Trademarks
+
+"Zwift", "Zwift Click", and any related terms are registered (or
+unregistered) trademarks of Zwift Inc. The use of these marks is purely
+descriptive in manner and not intended to imply any endorsement of the
+code provided in this repository by the marks' owners.
+
+### Liability
+
+In no event shall we be liable to you or any third parties for any
+special, punitive, incidental, indirect or consequential damages of any
+kind, or any damages whatsoever, including, without limitation, those
+resulting from loss of use, data or profits, and on any theory of
+liability, arising out of or in connection with the use of this software.
