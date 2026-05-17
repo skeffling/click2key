@@ -20,11 +20,22 @@ from __future__ import annotations
 import asyncio
 import enum
 import logging
+import os
 import time
 from dataclasses import dataclass
 
 from bleak import BleakClient, BleakScanner
 from bleak.backends.device import BLEDevice
+
+from .zap_crypto import (
+    MAC_LENGTH,
+    PUBKEY_RAW_LENGTH,
+    REQUEST_START,
+    RESPONSE_START,
+    RIDE_ON as ZAP_RIDE_ON,
+    ZapCipher,
+    ZapKeyExchange,
+)
 
 log = logging.getLogger(__name__)
 
@@ -33,11 +44,20 @@ ZWIFT_CUSTOM_SERVICE_UUID = "0000fc82-0000-1000-8000-00805f9b34fb"
 ZWIFT_ASYNC_CHAR_UUID = "00000002-19ca-4651-86e5-fa29dcdd09d1"
 ZWIFT_SYNC_TX_CHAR_UUID = "00000003-19ca-4651-86e5-fa29dcdd09d1"
 ZWIFT_SYNC_RX_CHAR_UUID = "00000004-19ca-4651-86e5-fa29dcdd09d1"
+# Three extra characteristics show up in the Click V2 GATT dump with
+# notify-capable properties; their purpose isn't yet known. Sniff them
+# during Phase A so we can see whether the real handshake/data flows here.
+ZWIFT_EXTRA_CHAR_UUIDS = (
+    "00000100-19ca-4651-86e5-fa29dcdd09d1",
+    "00000101-19ca-4651-86e5-fa29dcdd09d1",
+    "00000102-19ca-4651-86e5-fa29dcdd09d1",
+)
 # Standard Battery Service characteristic — readable, harmless to poll.
 BATTERY_LEVEL_CHAR_UUID = "00002a19-0000-1000-8000-00805f9b34fb"
 
-# Bytes the device sends/expects during the unencrypted "hello" phase.
-RIDE_ON = bytes([0x52, 0x69, 0x64, 0x65, 0x4F, 0x6E])  # b"RideOn"
+# Re-export so callers don't have to know about zap_crypto. Same value;
+# the wire format hasn't changed.
+RIDE_ON = ZAP_RIDE_ON
 
 
 def _read_varint(buf: bytes, start: int) -> tuple[int, int]:
@@ -123,6 +143,16 @@ class ClickV2:
         self._last_event_at: float | None = None
         # Set once we see a button event whose bit maps to a known puck.
         self.puck_identity: "Puck | None" = None
+        # CLICK2KEY_ENCRYPTED=1 opts into the ECDH handshake research path
+        # (subscribes to extra characteristics, logs raw frames for analysis).
+        # The Click V2 firmware doesn't return an ECDH pubkey in its reply, so
+        # we don't yet know how to derive a session key; the plaintext bitmap
+        # path is the working default. Set this flag if you're investigating
+        # the V2 protocol or wiring up a future reference.
+        self._encrypted: bool = os.environ.get("CLICK2KEY_ENCRYPTED", "0") == "1"
+        self._key_exchange: ZapKeyExchange | None = None
+        self._cipher: ZapCipher | None = None
+        self._handshake_complete: bool = False
 
     @property
     def battery_percent(self) -> int | None:
@@ -181,6 +211,20 @@ class ClickV2:
         # Subscribe BEFORE writing — otherwise we miss the handshake reply.
         await self._client.start_notify(ZWIFT_ASYNC_CHAR_UUID, self._on_async_notify)
         await self._client.start_notify(ZWIFT_SYNC_RX_CHAR_UUID, self._on_sync_notify)
+        # Research mode (CLICK2KEY_ENCRYPTED=1) also sniffs the three
+        # undocumented characteristics so future protocol work can see if any
+        # of them carry the V2 handshake/data. Skipped in normal use.
+        if self._encrypted:
+            for uuid in ZWIFT_EXTRA_CHAR_UUIDS:
+                try:
+                    short = uuid[6:8]
+                    await self._client.start_notify(
+                        uuid, lambda _c, data, s=short: log.info(
+                            "EXTRA RX 0x01%s (%d bytes): %s", s, len(data), bytes(data).hex(),
+                        ),
+                    )
+                except Exception:
+                    log.debug("Couldn't subscribe to %s", uuid)
         log.info("Subscribed to async + sync RX")
 
         await self._handshake()
@@ -237,42 +281,34 @@ class ClickV2:
         self._client = None
 
     # ------------------------------------------------------------------
-    # Handshake — TODO: port from ajchellew/zwiftplay
+    # Handshake (ECDH P-256 + HKDF-SHA256 + AES-CCM, per ajchellew/zwiftplay)
     # ------------------------------------------------------------------
 
     async def _handshake(self) -> None:
-        """Perform the RideOn + ECDH handshake.
-
-        Sketch (verify against zwiftplay source):
-          1. Generate an ephemeral P-256 keypair.
-          2. Write `RideOn || 0x01 || 0x03 || <our_pub_key_64B>` to SYNC_TX.
-          3. Read device's response on SYNC_RX: `RideOn || 0x01 || 0x02 || <peer_pub_key_64B>`.
-          4. Derive shared secret via ECDH; HKDF/sha256 → AES key + IV + counter seed.
-          5. From here, all messages on ASYNC are AES-GCM-encrypted protobuf.
-
-        For now we just send the RideOn greeting and log replies so we can
-        confirm the BLE link is alive before tackling crypto.
-        """
         assert self._client is not None
-        # SYNC_TX is write-without-response on Click V2 — confirmed by GATT dump.
-        # Greeting is "RideOn" + two-byte type code. zwiftplay docs show the
-        # full handshake also appends a 64-byte ECDH public key; we send the
-        # short greeting first to see what the device replies with.
-        greeting = RIDE_ON + bytes([0x01, 0x03])
-        log.warning("Handshake is a stub — sending greeting only (no pubkey yet)")
-        log.info("TX → SYNC_TX (%d bytes): %s", len(greeting), greeting.hex())
+        if self._encrypted:
+            self._key_exchange = ZapKeyExchange()
+            # CLICK2KEY_REQUEST_START=hex (e.g. 0102, 0103) overrides the
+            # 2-byte code after RideOn so we can probe Click V2 variants.
+            override = os.environ.get("CLICK2KEY_REQUEST_START", "")
+            req_start = bytes.fromhex(override) if override else REQUEST_START
+            greeting = (
+                RIDE_ON + req_start + self._key_exchange.local_pub_bytes()
+            )
+            log.info(
+                "Handshake TX (encrypted, %d bytes, REQUEST_START=%s)",
+                len(greeting), req_start.hex(),
+            )
+        else:
+            # Legacy plaintext bypass — short "RideOn" greeting puts the puck
+            # into the unencrypted compatibility mode that emits 0x23 0x08
+            # bitmap frames. Kept behind CLICK2KEY_PLAINTEXT=1 as a safety
+            # hatch while we validate the encrypted path on real hardware.
+            greeting = RIDE_ON + bytes([0x01, 0x03])
+            log.warning("Handshake TX (plaintext bypass mode)")
         await self._client.write_gatt_char(
             ZWIFT_SYNC_TX_CHAR_UUID, greeting, response=False
         )
-        # TODO post-handshake:
-        #   - send [0xFF, 0x04, 0x00] to ASYNC (BikeControl does this for V2;
-        #     likely the "stay awake past 60s" enable or a keepalive seed).
-        #   - start a 30s background task that re-sends a keepalive so the
-        #     Click does not stop emitting button events when its LED dims.
-        # Note: users report that a single ride with the official Zwift app
-        # also resolves the 60s notification-stop problem permanently. If
-        # the keepalive turns out to be unnecessary post-Zwift-pairing,
-        # we can leave the code in as belt-and-braces.
 
     # ------------------------------------------------------------------
     # Notification handlers
@@ -280,24 +316,61 @@ class ClickV2:
 
     def _on_async_notify(self, _char, data: bytearray) -> None:
         payload = bytes(data)
-        # Click V2 plaintext frame: 0x23 0x08 <varint bitmap>
-        # 0x23 = message type (button-state poll). 0x08 = protobuf field 1 (varint).
+        # Encrypted frame: counter(4) || ciphertext(N) || tag(4).
+        if self._handshake_complete and self._cipher is not None \
+                and len(payload) > 4 + MAC_LENGTH:
+            try:
+                plaintext = self._cipher.decrypt(payload[:4], payload[4:])
+            except Exception as ex:
+                log.warning("Decrypt failed (%s): %s", ex, payload.hex())
+                return
+            self._handle_encrypted_message(plaintext)
+            return
+        # Plaintext bypass mode — Click V2 sends: 0x23 0x08 <varint bitmap>.
+        # 0x23 = message type (button-state poll). 0x08 = protobuf field 1.
         # Bitmap is active-low: bit cleared == that button is currently pressed.
         if len(payload) >= 3 and payload[0] == 0x23 and payload[1] == 0x08:
             bitmap, _ = _read_varint(payload, 2)
             self._handle_bitmap(bitmap)
             return
-        # Battery poll: 0x19 0x10 <varint percent>. Pucks send this every ~5s.
+        # Plaintext battery: 0x19 0x10 <varint percent>. Pucks send this ~5s.
         if len(payload) >= 3 and payload[0] == 0x19 and payload[1] == 0x10:
             pct, _ = _read_varint(payload, 2)
             if pct != self._last_battery:
                 log.info("Battery: %d%%", pct)
                 self._last_battery = pct
             return
-        # Other frames (device info, capabilities, periodic heartbeats) — not
-        # actionable for shifting. Keep at DEBUG so they're available when
-        # investigating but don't drown the user-facing log.
-        log.debug("ASYNC RX (%d bytes, unhandled): %s", len(payload), payload.hex())
+        # Verbose only in encryption-research mode.
+        level = logging.INFO if self._encrypted else logging.DEBUG
+        log.log(level, "ASYNC RX (%d bytes, unhandled): %s", len(payload), payload.hex())
+
+    # Type codes inside decrypted frames; see ajchellew/zwiftplay ZapConstants.
+    _TYPE_CONTROLLER = 7
+    _TYPE_EMPTY = 21
+    _TYPE_BATTERY = 25
+
+    def _handle_encrypted_message(self, plaintext: bytes) -> None:
+        if not plaintext:
+            return
+        msg_type = plaintext[0]
+        body = plaintext[1:]
+        if msg_type == self._TYPE_EMPTY:
+            return  # periodic keepalive
+        if msg_type == self._TYPE_BATTERY:
+            # protobuf: field 1 varint = level. Body starts with 0x08 tag.
+            if len(body) >= 2 and body[0] == 0x08:
+                pct, _ = _read_varint(body, 1)
+                if pct != self._last_battery:
+                    log.info("Battery (encrypted): %d%%", pct)
+                    self._last_battery = pct
+            return
+        if msg_type == self._TYPE_CONTROLLER:
+            # Phase A: log only so we can reverse-engineer the V2 button
+            # protobuf layout. Phase B will decode and emit ButtonEvents.
+            self._last_event_at = time.monotonic()
+            log.info("Controller notification (encrypted): %s", body.hex())
+            return
+        log.info("Unknown encrypted type=%d body=%s", msg_type, body.hex())
 
     def _handle_bitmap(self, bitmap: int) -> None:
         last = self._last_bitmap
@@ -332,7 +405,34 @@ class ClickV2:
         return ButtonEvent(bit=bit, puck=puck, button=button, is_down=is_down)
 
     def _on_sync_notify(self, _char, data: bytearray) -> None:
-        # The "RideOn 02 03" reply lands here once at connect; afterwards SYNC
-        # is silent. Keep at DEBUG so it doesn't clutter the user log.
-        log.debug("SYNC RX (%d bytes): %s", len(data), bytes(data).hex())
+        payload = bytes(data)
+        # Verbose only in encryption-research mode; quiet for normal users.
+        level = logging.INFO if self._encrypted else logging.DEBUG
+        log.log(level, "SYNC RX (%d bytes): %s", len(payload), payload.hex())
+        # Generic RideOn-prefixed reply: log the 2-byte response code that
+        # follows so we can see what the V2 actually returns. Reference V1
+        # uses 01 03; observed V2 returns 02 03 with no pubkey payload.
+        if payload.startswith(RIDE_ON) and len(payload) >= len(RIDE_ON) + 2:
+            response_code = payload[len(RIDE_ON):len(RIDE_ON) + 2]
+            body = payload[len(RIDE_ON) + 2:]
+            log.log(
+                level,
+                "Handshake reply: response_code=%s body_len=%d body=%s",
+                response_code.hex(), len(body), body.hex(),
+            )
+            if (
+                self._encrypted
+                and self._key_exchange is not None
+                and not self._handshake_complete
+                and response_code == RESPONSE_START
+                and len(body) == PUBKEY_RAW_LENGTH
+            ):
+                try:
+                    aes_key, iv_prefix = self._key_exchange.derive(body)
+                    self._cipher = ZapCipher(aes_key, iv_prefix)
+                except Exception:
+                    log.exception("Failed to derive session keys")
+                    return
+                self._handshake_complete = True
+                log.info("Handshake complete: encrypted session established")
 
