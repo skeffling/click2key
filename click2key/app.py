@@ -288,9 +288,14 @@ class App(ctk.CTk):
 
         self._perm_hint = ctk.CTkLabel(
             self._setup_panel, text="", anchor="w", justify="left",
-            text_color="#d8a200",
+            text_color="#d8a200", wraplength=580,
         )
         self._perm_hint.pack(fill="x", padx=12, pady=(2, 0))
+        # Re-wrap when the window is resized.
+        self._setup_panel.bind(
+            "<Configure>",
+            lambda e: self._perm_hint.configure(wraplength=max(200, e.width - 28)),
+        )
 
         ctk.CTkLabel(
             self._setup_panel,
