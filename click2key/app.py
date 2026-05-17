@@ -419,16 +419,16 @@ class App(ctk.CTk):
     def _build_permission_row(
         self, name: str, on_fix: Callable[[], None], leading_padx: int,
     ) -> tuple[ctk.CTkLabel, ctk.CTkButton]:
-        """Dot + label + (visibility-controlled) 'Open Settings' button."""
+        """Dot + label + (visibility-controlled) fix button for one permission."""
         dot = ctk.CTkLabel(
             self._perm_row, text="●", font=ctk.CTkFont(size=14),
             text_color=DOT_OFF, width=14,
         )
         dot.pack(side="left", padx=(leading_padx, 0))
         ctk.CTkLabel(self._perm_row, text=name).pack(side="left", padx=(2, 4))
-        # Not packed here; _refresh_state shows/hides based on permission state.
+        # Packed later by _refresh_state when this permission is denied.
         fix_btn = ctk.CTkButton(
-            self._perm_row, text="Open Settings", width=110, height=22,
+            self._perm_row, text=f"Fix {name}", width=130, height=22,
             command=on_fix,
         )
         return dot, fix_btn
@@ -471,22 +471,27 @@ class App(ctk.CTk):
         # via CoreBluetooth/AX on every 3s tick.
         bt = self._bt_perm.is_granted()
         ax = self._ax_perm.is_granted()
-        self._bt_dot.configure(text_color=DOT_ON if bt is True else DOT_OFF)
-        self._ax_dot.configure(text_color=DOT_ON if ax is True else DOT_OFF)
-        if bt is True:
-            self._bt_fix_btn.pack_forget()
-        elif not self._bt_fix_btn.winfo_ismapped():
-            self._bt_fix_btn.pack(side="left", padx=(4, 0))
-        if ax is True:
-            self._ax_fix_btn.pack_forget()
-        elif not self._ax_fix_btn.winfo_ismapped():
-            self._ax_fix_btn.pack(side="left", padx=(4, 0))
+        perms_ok = bt is True and ax is True
+
+        # Hide the whole permission row when everything's granted. Otherwise
+        # show the row plus only the fix buttons for what's actually missing.
+        if perms_ok and self._perm_row.winfo_ismapped():
+            self._perm_row.pack_forget()
+        elif not perms_ok and not self._perm_row.winfo_ismapped():
+            self._perm_row.pack(fill="x", padx=12, pady=(8, 0), before=self._perm_hint)
+
+        if not perms_ok:
+            self._bt_dot.configure(text_color=DOT_ON if bt is True else DOT_OFF)
+            self._ax_dot.configure(text_color=DOT_ON if ax is True else DOT_OFF)
+            self._toggle_packed(self._bt_fix_btn, bt is not True)
+            self._toggle_packed(self._ax_fix_btn, ax is not True)
+
         perm_msgs: list[str] = []
         if bt is False or bt is None:
-            perm_msgs.append("• Bluetooth not granted — click 'Open Settings' and enable Click2Key.")
+            perm_msgs.append("• Bluetooth not granted — click 'Fix Bluetooth' to enable in System Settings.")
         if ax is False:
             perm_msgs.append(
-                "• Accessibility not granted — click 'Open Settings', add Click2Key, then relaunch."
+                "• Accessibility not granted — click 'Fix Accessibility', add Click2Key, then relaunch."
             )
         silent_count = sum(1 for c in self._clicks.values() if c.is_silent)
         if silent_count > 0:
@@ -530,6 +535,14 @@ class App(ctk.CTk):
     def _tick_refresh(self) -> None:
         self._refresh_state()
         self.after(3000, self._tick_refresh)
+
+    @staticmethod
+    def _toggle_packed(widget, visible: bool, **pack_kw) -> None:
+        """Pack or pack_forget idempotently. Default pack opts: side=left, small left pad."""
+        if visible and not widget.winfo_ismapped():
+            widget.pack(**(pack_kw or {"side": "left", "padx": (4, 0)}))
+        elif not visible and widget.winfo_ismapped():
+            widget.pack_forget()
 
     def _flash_glyph(self, puck: Puck, button: Button | None) -> None:
         if button is None:
