@@ -15,6 +15,16 @@ Runs on macOS and Windows.
   whatever)
 - A small in-app log + permission shortcuts for troubleshooting
 
+## Screenshots
+
+First launch — wake your pucks, then hit *Scan + Connect*:
+
+![Click2Key on first launch](assets/screenshots/startup.png)
+
+Both pucks connected and ready — keystrokes go to whichever app has focus:
+
+![Click2Key with both pucks connected](assets/screenshots/connected.png)
+
 ## Install (macOS)
 
 Download `Click2Key-macos-arm64.zip` from the
