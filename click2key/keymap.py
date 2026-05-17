@@ -1,4 +1,9 @@
-"""Keyboard-mapping config: persistence + parsing + MyWhoosh presets."""
+"""Keyboard-mapping config: persistence + parsing + MyWhoosh presets.
+
+A button's binding has three parts: the key it sends, how many times to
+send it on a single press, and (globally) how long to wait between
+repeats. Repeats let one puck press shift two or three gears in a row.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +11,7 @@ import json
 import logging
 import os
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from pynput.keyboard import Key, KeyCode
@@ -35,6 +41,10 @@ _SPECIAL_KEYS: dict[str, Key] = {
     "cmd": Key.cmd,
     **{f"f{i}": getattr(Key, f"f{i}") for i in range(1, 13)},
 }
+
+
+MAX_REPEATS = 3
+DEFAULT_DELAY_MS = 60
 
 
 def parse_key(value: str) -> Key | KeyCode | None:
@@ -87,20 +97,25 @@ MYWHOOSH_PRESETS: list[tuple[str, str]] = [
 DEFAULTS_BY_BUTTON: dict[Button, str] = {
     Button.SHIFT_UP:   "k",
     Button.SHIFT_DOWN: "i",
-    # Right puck arrows → keyboard arrows (matches MyWhoosh's nav defaults).
     Button.NAV_UP:     "up",
     Button.NAV_DOWN:   "down",
     Button.NAV_LEFT:   "left",
     Button.NAV_RIGHT:  "right",
-    # Left puck colored buttons → reasonable starting points; user can remap.
-    # MyWhoosh has H=toggle UI, A=steer left, D=steer right, T=tuck, U=u-turn,
-    # 1-7=emotes. Defaulting to the colored letters themselves keeps things
-    # predictable; rebind in Configure keys… to taste.
     Button.A:          "a",
     Button.B:          "b",
     Button.Y:          "y",
     Button.Z:          "z",
 }
+
+
+@dataclass
+class KeymapConfig:
+    mapping: dict[Button, Key | KeyCode] = field(default_factory=dict)
+    repeats: dict[Button, int] = field(default_factory=dict)
+    delay_ms: int = DEFAULT_DELAY_MS
+
+    def repeats_for(self, button: Button) -> int:
+        return self.repeats.get(button, 1)
 
 
 def _config_dir() -> Path:
@@ -116,27 +131,61 @@ def config_path() -> Path:
     return _config_dir() / "keymap.json"
 
 
-def load_keymap() -> dict[Button, Key | KeyCode]:
-    """Load mapping from config file, falling back to built-in defaults."""
+def _clamp_repeats(value: object) -> int:
+    try:
+        n = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 1
+    return max(1, min(MAX_REPEATS, n))
+
+
+def load_keymap() -> KeymapConfig:
+    """Load mapping + repeats + delay from disk. Falls back to defaults.
+
+    Accepts two schemas for backwards compatibility:
+        flat:        {"shift_up": "k", ...}
+        structured:  {"delay_ms": 80,
+                      "shift_up": {"key": "k", "repeats": 2}, ...}
+    """
     path = config_path()
-    raw: dict[str, str] = {}
+    raw: dict[str, object] = {}
     if path.exists():
         try:
             raw = json.loads(path.read_text())
         except Exception:
             log.exception("Failed to read keymap %s; using defaults", path)
+
+    delay_ms = DEFAULT_DELAY_MS
+    raw_delay = raw.get("delay_ms")
+    if isinstance(raw_delay, (int, float)):
+        delay_ms = max(0, int(raw_delay))
+
     mapping: dict[Button, Key | KeyCode] = {}
+    repeats: dict[Button, int] = {}
     for button in Button:
-        key_str = raw.get(button.value, DEFAULTS_BY_BUTTON.get(button, ""))
+        entry = raw.get(button.value, DEFAULTS_BY_BUTTON.get(button, ""))
+        if isinstance(entry, dict):
+            key_str = str(entry.get("key", ""))
+            rep = _clamp_repeats(entry.get("repeats", 1))
+        else:
+            key_str = str(entry)
+            rep = 1
         parsed = parse_key(key_str)
         if parsed is not None:
             mapping[button] = parsed
-    return mapping
+        repeats[button] = rep
+    return KeymapConfig(mapping=mapping, repeats=repeats, delay_ms=delay_ms)
 
 
-def save_keymap(mapping: dict[Button, Key | KeyCode]) -> None:
+def save_keymap(config: KeymapConfig) -> None:
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    serializable = {b.value: format_key(k) for b, k in mapping.items()}
-    path.write_text(json.dumps(serializable, indent=2))
+    out: dict[str, object] = {"delay_ms": int(config.delay_ms)}
+    for button in Button:
+        entry: dict[str, object] = {"key": format_key(config.mapping.get(button))}
+        rep = _clamp_repeats(config.repeats.get(button, 1))
+        if rep != 1:
+            entry["repeats"] = rep
+        out[button.value] = entry
+    path.write_text(json.dumps(out, indent=2))
     log.info("Saved keymap to %s", path)
